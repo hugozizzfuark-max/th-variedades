@@ -56,7 +56,7 @@ def carregar_vendas():
         ])
 
 def salvar_dados(df_estoque, df_vendas):
-    # Recalcular margem % em relação ao Custo Total (Lucro / Custo Total * 100)
+    # Recalcular margem % antes de persistir no arquivo CSV
     if not df_estoque.empty:
         df_estoque['margem_porcentagem'] = df_estoque.apply(
             lambda row: round(((row['preco_venda_unitario'] - row['custo_total_unitario']) / row['custo_total_unitario']) * 100, 2)
@@ -120,7 +120,7 @@ def processar_csv_upload(uploaded_file, df_estoque):
             frete_unit = row['frete_unitario']
             custo_tot_unit = row['custo_total_unitario']
             
-            # PREÇO SUGERIDO (Custo Total + 150% de Lucro sobre o custo)
+            # PREÇO SUGERIDO (150% de Markup sobre o Custo)
             preco_sugerido = round(custo_tot_unit * 2.50, 2)
 
             match_index = df_estoque[
@@ -147,8 +147,6 @@ def processar_csv_upload(uploaded_file, df_estoque):
                 df_estoque.at[idx, 'ultimo_pedido_id'] = id_pedido
             else:
                 novo_sku = f"TH-{len(df_estoque) + 1:03d}"
-                
-                # Porcentagem de margem calculada sobre o custo total
                 margem_inicial = round(((preco_sugerido - custo_tot_unit) / custo_tot_unit) * 100, 2) if custo_tot_unit > 0 else 0.0
 
                 novo_item = {
@@ -211,26 +209,22 @@ if st.sidebar.button("⚠️ Zerar Todos os Dados", key="btn_zerar_dados"):
 if menu == "📊 Dashboard & KPIs":
     st.title("📊 Painel Geral de Vendas e Previsões")
     
-    # 1. Faturamento e Lucro Realizado
     faturamento_real = (df_vendas['quantidade_vendida'] * df_vendas['preco_venda_praticado']).sum() if not df_vendas.empty else 0.0
     lucro_real = df_vendas['lucro_total_venda'].sum() if not df_vendas.empty else 0.0
     custo_total_vendido = (df_vendas['quantidade_vendida'] * df_vendas['custo_unitario']).sum() if not df_vendas.empty else 0.0
     margem_real_pct = (lucro_real / custo_total_vendido * 100) if custo_total_vendido > 0 else 0.0
     
-    # 2. Previsão de Faturamento e Lucro (Estoque)
     prev_faturamento = (df_estoque['quantidade_estoque'] * df_estoque['preco_venda_unitario']).sum() if not df_estoque.empty else 0.0
     prev_custo_estoque = (df_estoque['quantidade_estoque'] * df_estoque['custo_total_unitario']).sum() if not df_estoque.empty else 0.0
     prev_lucro = prev_faturamento - prev_custo_estoque
     margem_estoque_pct = (prev_lucro / prev_custo_estoque * 100) if prev_custo_estoque > 0 else 0.0
     
-    # Linha 1 de Cartões: R$ Faturamento e Lucro
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Faturamento Realizado", f"R$ {faturamento_real:.2f}")
     col2.metric("Lucro Realizado", f"R$ {lucro_real:.2f}")
     col3.metric("Prev. Faturamento (Estoque)", f"R$ {prev_faturamento:.2f}")
     col4.metric("Prev. Lucro Total (Estoque)", f"R$ {prev_lucro:.2f}")
 
-    # Linha 2 de Cartões: % Margem de Lucro sobre Custo
     col_m1, col_m2 = st.columns(2)
     col_m1.metric("📈 % Margem de Lucro Real (Até o momento)", f"{margem_real_pct:.2f}%")
     col_m2.metric("📦 % Margem de Lucro Total (Estoque Projetado)", f"{margem_estoque_pct:.2f}%")
@@ -243,20 +237,15 @@ if menu == "📊 Dashboard & KPIs":
         st.info("Nenhuma venda registrada até o momento.")
 
 # ---------------------------------------------------------
-# ABA 2: ESTOQUE E PREÇOS
+# ABA 2: ESTOQUE E PREÇOS (RECALCULO EM TEMPO REAL)
 # ---------------------------------------------------------
 elif menu == "📦 Estoque & Preços":
     st.title("📦 Gerenciamento de Estoque e Margens")
     
     if not df_estoque.empty:
-        # Recalcular a coluna % Margem Lucro sobre o Custo na exibição
-        df_estoque['margem_porcentagem'] = df_estoque.apply(
-            lambda row: round(((row['preco_venda_unitario'] - row['custo_total_unitario']) / row['custo_total_unitario']) * 100, 2)
-            if row['custo_total_unitario'] > 0 else 0.0, axis=1
-        )
+        st.caption("💡 Digite um novo valor em **Preço de Venda (R$)**. A **% Margem Lucro** será recalculada instantaneamente na tela!")
         
-        st.caption("💡 O **Preço de Venda (R$)** reflete 150% de lucro sobre o custo total. Altere os valores se desejar e clique em Salvar.")
-        
+        # Tabela editável
         df_editavel = st.data_editor(
             df_estoque,
             column_config={
@@ -271,12 +260,19 @@ elif menu == "📦 Estoque & Preços":
                 "ultimo_pedido_id": st.column_config.TextColumn("Lote Pedido", disabled=True)
             },
             hide_index=True,
-            use_container_width=True
+            use_container_width=True,
+            key="tabela_estoque_editor"
+        )
+
+        # RECALCULAR A MARGEM EM TEMPO REAL NA MEMÓRIA
+        df_editavel['margem_porcentagem'] = df_editavel.apply(
+            lambda row: round(((row['preco_venda_unitario'] - row['custo_total_unitario']) / row['custo_total_unitario']) * 100, 2)
+            if row['custo_total_unitario'] > 0 else 0.0, axis=1
         )
 
         if st.button("💾 Salvar Alterações nos Preços", use_container_width=True):
             salvar_dados(df_editavel, df_vendas)
-            st.toast("Preços e margens atualizados!", icon="✅")
+            st.toast("Preços e margens salvos com sucesso!", icon="✅")
             st.rerun()
     else:
         st.info("O estoque está vazio. Importe um pedido em CSV para começar.")
