@@ -9,7 +9,7 @@ import re
 # CONFIGURAÇÃO DA PÁGINA STREAMLIT
 # ________________________________
 st.set_page_config(
-    page_title="XZ Variedades - Gestão & Estoque",
+    page_title="TH Variedades - Gestão & Estoque",
     page_icon="🛍️",
     layout="wide"
 )
@@ -145,7 +145,7 @@ def processar_csv_upload(uploaded_file, df_estoque):
                 df_estoque.at[idx, 'ultimo_pedido_id'] = id_pedido
             else:
                 # Geração dinâmica do SKU com padrão XZ
-                novo_sku = f"XZ-{len(df_estoque) + 1:03d}"
+                novo_sku = f"TH-{len(df_estoque) + 1:03d}"
                 margem_inicial = round(((preco_sugerido - custo_tot_unit) / custo_tot_unit) * 100, 2) if custo_tot_unit > 0 else 0.0
 
                 novo_item = {
@@ -175,7 +175,7 @@ df_vendas = carregar_vendas()
 # ________________________________
 # INTERFACE GRÁFICA (SIDEBAR E NAVEGAÇÃO)
 # ________________________________
-st.sidebar.title("🛍️ XZ Variedades")
+st.sidebar.title("🛍️ TH Variedades")
 st.sidebar.markdown("---")
 
 menu = st.sidebar.radio(
