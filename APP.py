@@ -289,3 +289,27 @@ elif menu == "📥 Importar Pedido (CSV)":
                 salvar_dados(df_estoque, df_vendas)
                 st.success("Pedido importado e estoque atualizado com sucesso!")
                 st.rerun()
+
+# =========================================================
+# INTERFACE GRÁFICA (SIDEBAR E NAVEGAÇÃO)
+# =========================================================
+st.sidebar.title("🛍️ TH Variedades")
+st.sidebar.markdown("---")
+menu = st.sidebar.radio("Navegação", ["📊 Dashboard & KPIs", "📦 Estoque & Preços", "🛒 Registrar Venda", "📥 Importar Pedido (CSV)"])
+
+# BOTÃO PARA ZERAR OS DADOS
+st.sidebar.markdown("---")
+if st.sidebar.button("⚠️ Zerar Todos os Dados"):
+    df_estoque_zerado = pd.DataFrame(columns=[
+        'sku', 'nome_produto', 'quantidade_estoque', 
+        'preco_custo_unitario', 'frete_unitario', 'custo_total_unitario', 
+        'preco_venda_unitario', 'ultimo_pedido_id'
+    ])
+    df_vendas_zerado = pd.DataFrame(columns=[
+        'id_venda', 'sku', 'nome_produto', 'quantidade_vendida', 
+        'preco_venda_praticado', 'custo_unitario', 'lucro_total_venda', 'data_hora'
+    ])
+    
+    salvar_dados(df_estoque_zerado, df_vendas_zerado)
+    st.sidebar.success("Todos os dados foram zerados com sucesso!")
+    st.rerun()
