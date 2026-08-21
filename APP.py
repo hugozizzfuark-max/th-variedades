@@ -56,7 +56,6 @@ def carregar_vendas():
         ])
 
 def salvar_dados(df_estoque, df_vendas):
-    # Recalcular margem % antes de persistir no arquivo CSV
     if not df_estoque.empty:
         df_estoque['margem_porcentagem'] = df_estoque.apply(
             lambda row: round(((row['preco_venda_unitario'] - row['custo_total_unitario']) / row['custo_total_unitario']) * 100, 2)
@@ -120,7 +119,6 @@ def processar_csv_upload(uploaded_file, df_estoque):
             frete_unit = row['frete_unitario']
             custo_tot_unit = row['custo_total_unitario']
             
-            # PREÇO SUGERIDO (150% de Markup sobre o Custo)
             preco_sugerido = round(custo_tot_unit * 2.50, 2)
 
             match_index = df_estoque[
@@ -237,17 +235,27 @@ if menu == "📊 Dashboard & KPIs":
         st.info("Nenhuma venda registrada até o momento.")
 
 # ---------------------------------------------------------
-# ABA 2: ESTOQUE E PREÇOS (RECALCULO EM TEMPO REAL)
+# ABA 2: ESTOQUE E PREÇOS (RECALCULANDO MARGEM AO DIGITAR)
 # ---------------------------------------------------------
 elif menu == "📦 Estoque & Preços":
     st.title("📦 Gerenciamento de Estoque e Margens")
     
     if not df_estoque.empty:
-        st.caption("💡 Digite um novo valor em **Preço de Venda (R$)**. A **% Margem Lucro** será recalculada instantaneamente na tela!")
-        
+        st.caption("💡 Digite um novo valor em **Preço de Venda (R$)** e aperte **Enter**. A **% Margem Lucro** será recalculada automaticamente!")
+
+        # Guardar cópia no session_state para permitir edições reativas
+        if "df_edit" not in st.session_state:
+            st.session_state.df_edit = df_estoque.copy()
+
+        # Recalcular margem para cada linha exibida na tela
+        st.session_state.df_edit['margem_porcentagem'] = st.session_state.df_edit.apply(
+            lambda row: round(((row['preco_venda_unitario'] - row['custo_total_unitario']) / row['custo_total_unitario']) * 100, 2)
+            if row['custo_total_unitario'] > 0 else 0.0, axis=1
+        )
+
         # Tabela editável
-        df_editavel = st.data_editor(
-            df_estoque,
+        edited_df = st.data_editor(
+            st.session_state.df_edit,
             column_config={
                 "sku": st.column_config.TextColumn("SKU", disabled=True),
                 "nome_produto": st.column_config.TextColumn("Produto", disabled=True),
@@ -261,17 +269,17 @@ elif menu == "📦 Estoque & Preços":
             },
             hide_index=True,
             use_container_width=True,
-            key="tabela_estoque_editor"
+            key="tabela_editor_interativo"
         )
 
-        # RECALCULAR A MARGEM EM TEMPO REAL NA MEMÓRIA
-        df_editavel['margem_porcentagem'] = df_editavel.apply(
-            lambda row: round(((row['preco_venda_unitario'] - row['custo_total_unitario']) / row['custo_total_unitario']) * 100, 2)
-            if row['custo_total_unitario'] > 0 else 0.0, axis=1
-        )
+        # Se houver modificações na tabela, atualiza o estado e recarrega
+        if not edited_df.equals(st.session_state.df_edit):
+            st.session_state.df_edit = edited_df
+            salvar_dados(edited_df, df_vendas)
+            st.rerun()
 
         if st.button("💾 Salvar Alterações nos Preços", use_container_width=True):
-            salvar_dados(df_editavel, df_vendas)
+            salvar_dados(st.session_state.df_edit, df_vendas)
             st.toast("Preços e margens salvos com sucesso!", icon="✅")
             st.rerun()
     else:
@@ -344,6 +352,8 @@ elif menu == "📥 Importar Pedido (CSV)":
                 
             if sucesso:
                 salvar_dados(df_estoque, df_vendas)
+                if "df_edit" in st.session_state:
+                    del st.session_state["df_edit"]
                 st.success("✅ Pedido processado e adicionado ao estoque!")
                 st.toast("Estoque atualizado com sucesso!", icon="📦")
                 
