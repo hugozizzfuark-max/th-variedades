@@ -14,7 +14,6 @@ st.set_page_config(
     layout="wide"
 )
 
-# Caminhos dos arquivos de dados locais/repositório
 ARQUIVO_ESTOQUE = "estoque.csv"
 ARQUIVO_VENDAS = "vendas.csv"
 
@@ -29,10 +28,7 @@ def normalizar_texto(texto):
     ).lower().strip()
 
 def limpar_nome_produto(nome):
-    """
-    Remove números soltos ou marcadores do início do nome 
-    (ex: '1 SABONETE...' vira 'SABONETE...')
-    """
+    """Remove números soltos ou marcadores do início do nome"""
     nome_limpo = str(nome).strip()
     nome_limpo = re.sub(r'^\d+\s*(\(un\))?\s*(x)?\s*', '', nome_limpo, flags=re.IGNORECASE)
     return nome_limpo.strip()
@@ -73,14 +69,12 @@ def processar_csv_upload(uploaded_file, df_estoque):
 
         df_novo.columns = [normalizar_texto(col) for col in df_novo.columns]
         
-        # Validar colunas
         colunas_necessarias = ['nome_produto', 'quantidade', 'preco_custo_unitario']
         for col in colunas_necessarias:
             if col not in df_novo.columns:
-                st.error(f"Coluna obrigatória '{col}' não foi encontrada no arquivo CSV.")
-                return df_estoque, False
+                st.error(f"❌ A coluna obrigatória **'{col}'** não foi encontrada no arquivo CSV.")
+                return df_estoque, False, 0, 0.0
 
-        # Tratamento numérico
         df_novo['quantidade'] = pd.to_numeric(df_novo['quantidade'], errors='coerce').fillna(0).astype(int)
         df_novo['preco_custo_unitario'] = pd.to_numeric(
             df_novo['preco_custo_unitario'].astype(str).str.replace('R$', '', regex=False).str.replace(',', '.').str.strip(),
@@ -98,7 +92,6 @@ def processar_csv_upload(uploaded_file, df_estoque):
 
         df_novo['valor_total_item'] = df_novo['quantidade'] * df_novo['preco_custo_unitario']
 
-        # Rateio do frete
         subtotal = df_novo['valor_total_item'].sum()
         if subtotal > 0 and frete_total > 0:
             df_novo['peso_valor'] = df_novo['valor_total_item'] / subtotal
@@ -107,8 +100,6 @@ def processar_csv_upload(uploaded_file, df_estoque):
             df_novo['frete_unitario'] = 0.0
 
         df_novo['custo_total_unitario'] = df_novo['preco_custo_unitario'] + df_novo['frete_unitario']
-
-        # Atualizar tabela de estoque
         id_pedido = f"PED-{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
         for _, row in df_novo.iterrows():
@@ -152,13 +143,13 @@ def processar_csv_upload(uploaded_file, df_estoque):
                 }
                 df_estoque = pd.concat([df_estoque, pd.DataFrame([novo_item])], ignore_index=True)
 
-        return df_estoque, True
+        return df_estoque, True, len(df_novo), frete_total
     except Exception as e:
-        st.error(f"Erro ao processar o arquivo: {e}")
-        return df_estoque, False
+        st.error(f"❌ Erro ao processar o arquivo: {e}")
+        return df_estoque, False, 0, 0.0
 
 # =========================================================
-# CARREGAR ESTADO DOS DADOS
+# CARREGAR DADOS
 # =========================================================
 df_estoque = carregar_estoque()
 df_vendas = carregar_vendas()
@@ -190,7 +181,7 @@ if st.sidebar.button("⚠️ Zerar Todos os Dados", key="btn_zerar_dados"):
     ])
     
     salvar_dados(df_estoque_zerado, df_vendas_zerado)
-    st.sidebar.success("Todos os dados foram zerados com sucesso!")
+    st.sidebar.success("Todos os dados foram zerados!")
     st.rerun()
 
 # ---------------------------------------------------------
@@ -199,14 +190,12 @@ if st.sidebar.button("⚠️ Zerar Todos os Dados", key="btn_zerar_dados"):
 if menu == "📊 Dashboard & KPIs":
     st.title("📊 Painel Geral de Vendas e Previsões")
     
-    # Cálculos Globais
     faturamento_real = (df_vendas['quantidade_vendida'] * df_vendas['preco_venda_praticado']).sum() if not df_vendas.empty else 0.0
     lucro_real = df_vendas['lucro_total_venda'].sum() if not df_vendas.empty else 0.0
     
     prev_faturamento = (df_estoque['quantidade_estoque'] * df_estoque['preco_venda_unitario']).sum()
     prev_lucro = (df_estoque['quantidade_estoque'] * (df_estoque['preco_venda_unitario'] - df_estoque['custo_total_unitario'])).sum()
     
-    # Cartões Indicadores
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Faturamento Realizado", f"R$ {faturamento_real:.2f}")
     col2.metric("Lucro Realizado", f"R$ {lucro_real:.2f}")
@@ -227,9 +216,8 @@ elif menu == "📦 Estoque & Preços":
     st.title("📦 Gerenciamento de Estoque e Margens")
     
     if not df_estoque.empty:
-        st.markdown("Edite o **Preço de Venda Unitário** diretamente na tabela abaixo:")
+        st.caption("💡 Altere os valores na coluna **Preço de Venda (R$)** e clique no botão abaixo para salvar.")
         
-        # Tabela editável
         df_editavel = st.data_editor(
             df_estoque,
             column_config={
@@ -246,9 +234,9 @@ elif menu == "📦 Estoque & Preços":
             use_container_width=True
         )
 
-        if st.button("💾 Salvar Alterações nos Preços"):
+        if st.button("💾 Salvar Alterações nos Preços", use_container_width=True):
             salvar_dados(df_editavel, df_vendas)
-            st.success("Preços e estoque atualizados com sucesso!")
+            st.toast("Preços e estoque atualizados!", icon="✅")
             st.rerun()
     else:
         st.info("O estoque está vazio. Importe um pedido em CSV para começar.")
@@ -260,16 +248,14 @@ elif menu == "🛒 Registrar Venda":
     st.title("🛒 Baixa Rápida de Venda")
     
     if not df_estoque.empty:
-        # Filtrar apenas produtos que possuem estoque disponível
         df_disponivel = df_estoque[df_estoque['quantidade_estoque'] > 0]
         
         if not df_disponivel.empty:
             lista_produtos = df_disponivel.apply(lambda x: f"{x['sku']} - {x['nome_produto']} (Estoque: {x['quantidade_estoque']})", axis=1)
             
-            produto_selecionado = st.selectbox("Selecione o Produto:", lista_produtos)
+            produto_selecionado = st.selectbox("Selecione ou digite o nome/SKU do produto:", lista_produtos)
             sku_selecionado = produto_selecionado.split(" - ")[0]
             
-            # Buscar dados do produto selecionado
             item = df_estoque[df_estoque['sku'] == sku_selecionado].iloc[0]
             
             col_a, col_b = st.columns(2)
@@ -279,15 +265,13 @@ elif menu == "🛒 Registrar Venda":
                 preco_venda_input = st.number_input("Preço Praticado por Unidade (R$):", min_value=0.0, value=float(item['preco_venda_unitario']))
 
             lucro_estimado = (preco_venda_input - item['custo_total_unitario']) * qtd_venda
-            st.info(f"Lucro total desta venda: **R$ {lucro_estimado:.2f}**")
+            st.info(f"💰 Lucro total nesta transação: **R$ {lucro_estimado:.2f}**")
 
-            if st.button("✅ Confirmar e Dar Baixa"):
+            if st.button("✅ Confirmar Venda", use_container_width=True):
                 idx = df_estoque[df_estoque['sku'] == sku_selecionado].index[0]
                 
-                # Atualizar Estoque
                 df_estoque.at[idx, 'quantidade_estoque'] -= qtd_venda
                 
-                # Registrar Venda
                 nova_venda = {
                     'id_venda': f"VENDA-{len(df_vendas)+1:04d}",
                     'sku': sku_selecionado,
@@ -301,10 +285,10 @@ elif menu == "🛒 Registrar Venda":
                 df_vendas = pd.concat([df_vendas, pd.DataFrame([nova_venda])], ignore_index=True)
                 
                 salvar_dados(df_estoque, df_vendas)
-                st.success(f"Venda de {qtd_venda}x '{item['nome_produto']}' registrada com sucesso!")
+                st.toast(f"Venda de {qtd_venda}x '{item['nome_produto']}' registrada!", icon="🎉")
                 st.rerun()
         else:
-            st.warning("Todos os produtos cadastrados estão sem estoque disponível.")
+            st.warning("⚠️ Todos os produtos cadastrados estão com o estoque zerado.")
     else:
         st.info("Nenhum produto cadastrado no estoque.")
 
@@ -312,15 +296,24 @@ elif menu == "🛒 Registrar Venda":
 # ABA 4: IMPORTAR PEDIDO (CSV)
 # ---------------------------------------------------------
 elif menu == "📥 Importar Pedido (CSV)":
-    st.title("📥 Importar Novo Pedido de Fornecedor")
-    st.markdown("Faça o upload do arquivo `.csv` para adicionar novos produtos ou incrementar o estoque de produtos existentes.")
+    st.title("📥 Importar Pedido de Fornecedor")
+    st.caption("Suba o arquivo CSV com a lista de compras para atualizar seu estoque automaticamente.")
     
-    arquivo_upload = st.file_uploader("Escolha o arquivo CSV do Pedido", type=["csv"])
+    arquivo_upload = st.file_uploader("Selecione o arquivo CSV do pedido", type=["csv"])
     
     if arquivo_upload is not None:
-        if st.button("🚀 Processar e Adicionar ao Estoque"):
-            df_estoque, sucesso = processar_csv_upload(arquivo_upload, df_estoque)
+        if st.button("🚀 Processar Pedido", use_container_width=True):
+            with st.spinner("Processando itens e calculando frete..."):
+                df_estoque, sucesso, qtd_itens, frete = processar_csv_upload(arquivo_upload, df_estoque)
+                
             if sucesso:
                 salvar_dados(df_estoque, df_vendas)
-                st.success("Pedido importado e estoque atualizado com sucesso!")
-                st.rerun()
+                st.success("✅ Pedido processado e adicionado ao estoque!")
+                st.toast("Estoque atualizado com sucesso!", icon="📦")
+                
+                # Exibir Resumo Amigável
+                c1, c2 = st.columns(2)
+                c1.metric("Itens Processados", qtd_itens)
+                c2.metric("Frete Rateado Detectado", f"R$ {frete:.2f}")
+                
+                st.balloons()
