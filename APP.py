@@ -5,9 +5,9 @@ from datetime import datetime
 import os
 import re
 
-# =========================================================
+# ________________________________
 # CONFIGURAÇÃO DA PÁGINA STREAMLIT
-# =========================================================
+# ________________________________
 st.set_page_config(
     page_title="TH Variedades - Gestão & Estoque",
     page_icon="🛍️",
@@ -17,9 +17,9 @@ st.set_page_config(
 ARQUIVO_ESTOQUE = "estoque.csv"
 ARQUIVO_VENDAS = "vendas.csv"
 
-# =========================================================
+# ________________________________
 # FUNÇÕES AUXILIARES DE DADOS
-# =========================================================
+# ________________________________
 def normalizar_texto(texto):
     """Remove acentos, espaços extras e converte para minúsculas"""
     return ''.join(
@@ -165,15 +165,15 @@ def processar_csv_upload(uploaded_file, df_estoque):
         st.error(f"❌ Erro ao processar o arquivo: {e}")
         return df_estoque, False, 0, 0.0
 
-# =========================================================
+# ________________________________
 # CARREGAR DADOS
-# =========================================================
+# ________________________________
 df_estoque = carregar_estoque()
 df_vendas = carregar_vendas()
 
-# =========================================================
+# ________________________________
 # INTERFACE GRÁFICA (SIDEBAR E NAVEGAÇÃO)
-# =========================================================
+# ________________________________
 st.sidebar.title("🛍️ TH Variedades")
 st.sidebar.markdown("---")
 
@@ -201,9 +201,9 @@ if st.sidebar.button("⚠️ Zerar Todos os Dados", key="btn_zerar_dados"):
     st.sidebar.success("Todos os dados foram zerados!")
     st.rerun()
 
-# ---------------------------------------------------------
+# ________________________________
 # ABA 1: DASHBOARD & KPIS
-# ---------------------------------------------------------
+# ________________________________
 if menu == "📊 Dashboard & KPIs":
     st.title("📊 Painel Geral de Vendas e Previsões")
     
@@ -234,9 +234,9 @@ if menu == "📊 Dashboard & KPIs":
     else:
         st.info("Nenhuma venda registrada até o momento.")
 
-# ---------------------------------------------------------
+# ________________________________
 # ABA 2: ESTOQUE E PREÇOS (RECALCULANDO MARGEM AO DIGITAR)
-# ---------------------------------------------------------
+# ________________________________
 elif menu == "📦 Estoque & Preços":
     st.title("📦 Gerenciamento de Estoque e Margens")
     
@@ -285,9 +285,9 @@ elif menu == "📦 Estoque & Preços":
     else:
         st.info("O estoque está vazio. Importe um pedido em CSV para começar.")
 
-# ---------------------------------------------------------
+# ________________________________
 # ABA 3: REGISTRAR VENDA (PDV)
-# ---------------------------------------------------------
+# ________________________________
 elif menu == "🛒 Registrar Venda":
     st.title("🛒 Baixa Rápida de Venda")
     
@@ -336,9 +336,9 @@ elif menu == "🛒 Registrar Venda":
     else:
         st.info("Nenhum produto cadastrado no estoque.")
 
-# ---------------------------------------------------------
+# ________________________________
 # ABA 4: IMPORTAR PEDIDO (CSV)
-# ---------------------------------------------------------
+# ________________________________
 elif menu == "📥 Importar Pedido (CSV)":
     st.title("📥 Importar Pedido de Fornecedor")
     st.caption("Suba o arquivo CSV com a lista de compras para atualizar seu estoque automaticamente.")
