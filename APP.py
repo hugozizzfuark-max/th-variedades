@@ -9,7 +9,7 @@ import re
 # CONFIGURAÇÃO DA PÁGINA STREAMLIT
 # ________________________________
 st.set_page_config(
-    page_title="TH Variedades - Gestão & Estoque",
+    page_title="XZ Variedades - Gestão & Estoque",
     page_icon="🛍️",
     layout="wide"
 )
@@ -144,7 +144,8 @@ def processar_csv_upload(uploaded_file, df_estoque):
                 
                 df_estoque.at[idx, 'ultimo_pedido_id'] = id_pedido
             else:
-                novo_sku = f"TH-{len(df_estoque) + 1:03d}"
+                # Geração dinâmica do SKU com padrão XZ
+                novo_sku = f"XZ-{len(df_estoque) + 1:03d}"
                 margem_inicial = round(((preco_sugerido - custo_tot_unit) / custo_tot_unit) * 100, 2) if custo_tot_unit > 0 else 0.0
 
                 novo_item = {
@@ -174,13 +175,13 @@ df_vendas = carregar_vendas()
 # ________________________________
 # INTERFACE GRÁFICA (SIDEBAR E NAVEGAÇÃO)
 # ________________________________
-st.sidebar.title("🛍️ TH Variedades")
+st.sidebar.title("🛍️ XZ Variedades")
 st.sidebar.markdown("---")
 
 menu = st.sidebar.radio(
     "Navegação", 
     ["📊 Dashboard & KPIs", "📦 Estoque & Preços", "🛒 Registrar Venda", "📥 Importar Pedido (CSV)"],
-    key="menu_principal_th"
+    key="menu_principal_xz"
 )
 
 st.sidebar.markdown("---")
@@ -198,6 +199,9 @@ if st.sidebar.button("⚠️ Zerar Todos os Dados", key="btn_zerar_dados"):
     ])
     
     salvar_dados(df_estoque_zerado, df_vendas_zerado)
+    # Limpeza do Estado da Memória ao zerar
+    if "df_edit" in st.session_state:
+        del st.session_state["df_edit"]
     st.sidebar.success("Todos os dados foram zerados!")
     st.rerun()
 
@@ -243,9 +247,8 @@ elif menu == "📦 Estoque & Preços":
     if not df_estoque.empty:
         st.caption("💡 Digite um novo valor em **Preço de Venda (R$)** e aperte **Enter**. A **% Margem Lucro** será recalculada automaticamente!")
 
-        # Guardar cópia no session_state para permitir edições reativas
-        if "df_edit" not in st.session_state:
-            st.session_state.df_edit = df_estoque.copy()
+        # Sincronização e Persistência do Estado da Memória ao Editar Preços
+        st.session_state.df_edit = df_estoque.copy()
 
         # Recalcular margem para cada linha exibida na tela
         st.session_state.df_edit['margem_porcentagem'] = st.session_state.df_edit.apply(
@@ -272,10 +275,10 @@ elif menu == "📦 Estoque & Preços":
             key="tabela_editor_interativo"
         )
 
-        # Se houver modificações na tabela, atualiza o estado e recarrega
+        # Se houver modificações na tabela, salva dados, sincroniza estado e recarrega
         if not edited_df.equals(st.session_state.df_edit):
-            st.session_state.df_edit = edited_df
             salvar_dados(edited_df, df_vendas)
+            st.session_state.df_edit = edited_df
             st.rerun()
 
         if st.button("💾 Salvar Alterações nos Preços", use_container_width=True):
@@ -329,6 +332,9 @@ elif menu == "🛒 Registrar Venda":
                 df_vendas = pd.concat([df_vendas, pd.DataFrame([nova_venda])], ignore_index=True)
                 
                 salvar_dados(df_estoque, df_vendas)
+                # Limpeza do cache ao registrar venda
+                if "df_edit" in st.session_state:
+                    del st.session_state["df_edit"]
                 st.toast(f"Venda de {qtd_venda}x '{item['nome_produto']}' registrada!", icon="🎉")
                 st.rerun()
         else:
@@ -352,6 +358,7 @@ elif menu == "📥 Importar Pedido (CSV)":
                 
             if sucesso:
                 salvar_dados(df_estoque, df_vendas)
+                # Limpeza do Estado da Memória ao Importar Pedido
                 if "df_edit" in st.session_state:
                     del st.session_state["df_edit"]
                 st.success("✅ Pedido processado e adicionado ao estoque!")
