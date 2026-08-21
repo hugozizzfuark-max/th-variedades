@@ -35,12 +35,16 @@ def limpar_nome_produto(nome):
 
 def carregar_estoque():
     if os.path.exists(ARQUIVO_ESTOQUE):
-        return pd.read_csv(ARQUIVO_ESTOQUE)
+        df = pd.read_csv(ARQUIVO_ESTOQUE)
+        # Garantir colunas necessárias se for arquivo antigo
+        if 'margem_porcentagem' not in df.columns:
+            df['margem_porcentagem'] = 0.0
+        return df
     else:
         return pd.DataFrame(columns=[
             'sku', 'nome_produto', 'quantidade_estoque', 
             'preco_custo_unitario', 'frete_unitario', 'custo_total_unitario', 
-            'preco_venda_unitario', 'ultimo_pedido_id'
+            'preco_venda_unitario', 'margem_porcentagem', 'ultimo_pedido_id'
         ])
 
 def carregar_vendas():
@@ -53,6 +57,12 @@ def carregar_vendas():
         ])
 
 def salvar_dados(df_estoque, df_vendas):
+    # Recalcular margem em % antes de salvar
+    if not df_estoque.empty:
+        df_estoque['margem_porcentagem'] = df_estoque.apply(
+            lambda row: round(((row['preco_venda_unitario'] - row['custo_total_unitario']) / row['preco_venda_unitario']) * 100, 2)
+            if row['preco_venda_unitario'] > 0 else 0.0, axis=1
+        )
     df_estoque.to_csv(ARQUIVO_ESTOQUE, index=False)
     df_vendas.to_csv(ARQUIVO_VENDAS, index=False)
 
@@ -110,6 +120,9 @@ def processar_csv_upload(uploaded_file, df_estoque):
             custo_unit = row['preco_custo_unitario']
             frete_unit = row['frete_unitario']
             custo_tot_unit = row['custo_total_unitario']
+            
+            # PREÇO SUGERIDO (Custo Total + 150% de Lucro = Custo Total * 2.50)
+            preco_sugerido = round(custo_tot_unit * 2.50, 2)
 
             match_index = df_estoque[
                 df_estoque['nome_produto'].apply(normalizar_texto) == normalizar_texto(nome)
@@ -128,9 +141,18 @@ def processar_csv_upload(uploaded_file, df_estoque):
 
                 df_estoque.at[idx, 'quantidade_estoque'] = qtd_nova_total
                 df_estoque.at[idx, 'custo_total_unitario'] = round(novo_custo_medio, 2)
+                
+                # Se o preço de venda anterior for 0, aplica o preço sugerido
+                if df_estoque.at[idx, 'preco_venda_unitario'] == 0.0:
+                    df_estoque.at[idx, 'preco_venda_unitario'] = preco_sugerido
+                
                 df_estoque.at[idx, 'ultimo_pedido_id'] = id_pedido
             else:
                 novo_sku = f"TH-{len(df_estoque) + 1:03d}"
+                
+                # Calcular a margem inicial em %
+                margem_inicial = round(((preco_sugerido - custo_tot_unit) / preco_sugerido) * 100, 2) if preco_sugerido > 0 else 0.0
+
                 novo_item = {
                     'sku': novo_sku,
                     'nome_produto': nome,
@@ -138,7 +160,8 @@ def processar_csv_upload(uploaded_file, df_estoque):
                     'preco_custo_unitario': round(custo_unit, 2),
                     'frete_unitario': round(frete_unit, 2),
                     'custo_total_unitario': round(custo_tot_unit, 2),
-                    'preco_venda_unitario': 0.0,
+                    'preco_venda_unitario': preco_sugerido, # Aplica os 150% de lucro automaticamente
+                    'margem_porcentagem': margem_inicial,
                     'ultimo_pedido_id': id_pedido
                 }
                 df_estoque = pd.concat([df_estoque, pd.DataFrame([novo_item])], ignore_index=True)
@@ -173,7 +196,7 @@ if st.sidebar.button("⚠️ Zerar Todos os Dados", key="btn_zerar_dados"):
     df_estoque_zerado = pd.DataFrame(columns=[
         'sku', 'nome_produto', 'quantidade_estoque', 
         'preco_custo_unitario', 'frete_unitario', 'custo_total_unitario', 
-        'preco_venda_unitario', 'ultimo_pedido_id'
+        'preco_venda_unitario', 'margem_porcentagem', 'ultimo_pedido_id'
     ])
     df_vendas_zerado = pd.DataFrame(columns=[
         'id_venda', 'sku', 'nome_produto', 'quantidade_vendida', 
@@ -190,17 +213,27 @@ if st.sidebar.button("⚠️ Zerar Todos os Dados", key="btn_zerar_dados"):
 if menu == "📊 Dashboard & KPIs":
     st.title("📊 Painel Geral de Vendas e Previsões")
     
+    # 1. Faturamento e Lucro Realizado
     faturamento_real = (df_vendas['quantidade_vendida'] * df_vendas['preco_venda_praticado']).sum() if not df_vendas.empty else 0.0
     lucro_real = df_vendas['lucro_total_venda'].sum() if not df_vendas.empty else 0.0
+    margem_real_pct = (lucro_real / faturamento_real * 100) if faturamento_real > 0 else 0.0
     
-    prev_faturamento = (df_estoque['quantidade_estoque'] * df_estoque['preco_venda_unitario']).sum()
-    prev_lucro = (df_estoque['quantidade_estoque'] * (df_estoque['preco_venda_unitario'] - df_estoque['custo_total_unitario'])).sum()
+    # 2. Previsão de Faturamento e Lucro (Estoque)
+    prev_faturamento = (df_estoque['quantidade_estoque'] * df_estoque['preco_venda_unitario']).sum() if not df_estoque.empty else 0.0
+    prev_lucro = (df_estoque['quantidade_estoque'] * (df_estoque['preco_venda_unitario'] - df_estoque['custo_total_unitario'])).sum() if not df_estoque.empty else 0.0
+    margem_estoque_pct = (prev_lucro / prev_faturamento * 100) if prev_faturamento > 0 else 0.0
     
+    # Linha 1 de Cartões: R$ Faturamento e Lucro
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Faturamento Realizado", f"R$ {faturamento_real:.2f}")
     col2.metric("Lucro Realizado", f"R$ {lucro_real:.2f}")
     col3.metric("Prev. Faturamento (Estoque)", f"R$ {prev_faturamento:.2f}")
     col4.metric("Prev. Lucro Total (Estoque)", f"R$ {prev_lucro:.2f}")
+
+    # Linha 2 de Cartões: % Margem de Lucro
+    col_m1, col_m2 = st.columns(2)
+    col_m1.metric("📈 % Margem de Lucro Real (Até o momento)", f"{margem_real_pct:.2f}%")
+    col_m2.metric("📦 % Margem de Lucro Total (Estoque Projetado)", f"{margem_estoque_pct:.2f}%")
 
     st.markdown("---")
     st.subheader("📋 Histórico Recente de Vendas")
@@ -216,7 +249,13 @@ elif menu == "📦 Estoque & Preços":
     st.title("📦 Gerenciamento de Estoque e Margens")
     
     if not df_estoque.empty:
-        st.caption("💡 Altere os valores na coluna **Preço de Venda (R$)** e clique no botão abaixo para salvar.")
+        # Recalcular a coluna % Margem na exibição
+        df_estoque['margem_porcentagem'] = df_estoque.apply(
+            lambda row: round(((row['preco_venda_unitario'] - row['custo_total_unitario']) / row['preco_venda_unitario']) * 100, 2)
+            if row['preco_venda_unitario'] > 0 else 0.0, axis=1
+        )
+        
+        st.caption("💡 O **Preço de Venda (R$)** já é sugerido com 150% de lucro sobre o custo total. Altere o valor se desejar e clique em Salvar.")
         
         df_editavel = st.data_editor(
             df_estoque,
@@ -228,6 +267,7 @@ elif menu == "📦 Estoque & Preços":
                 "frete_unitario": st.column_config.NumberColumn("Frete Unit. (R$)", disabled=True, format="R$ %.2f"),
                 "custo_total_unitario": st.column_config.NumberColumn("Custo Total (R$)", disabled=True, format="R$ %.2f"),
                 "preco_venda_unitario": st.column_config.NumberColumn("Preço de Venda (R$)", min_value=0.0, format="R$ %.2f"),
+                "margem_porcentagem": st.column_config.NumberColumn("% Margem Lucro", disabled=True, format="%.2f %%"),
                 "ultimo_pedido_id": st.column_config.TextColumn("Lote Pedido", disabled=True)
             },
             hide_index=True,
@@ -236,7 +276,7 @@ elif menu == "📦 Estoque & Preços":
 
         if st.button("💾 Salvar Alterações nos Preços", use_container_width=True):
             salvar_dados(df_editavel, df_vendas)
-            st.toast("Preços e estoque atualizados!", icon="✅")
+            st.toast("Preços e margens atualizados!", icon="✅")
             st.rerun()
     else:
         st.info("O estoque está vazio. Importe um pedido em CSV para começar.")
@@ -290,7 +330,7 @@ elif menu == "🛒 Registrar Venda":
         else:
             st.warning("⚠️ Todos os produtos cadastrados estão com o estoque zerado.")
     else:
-        st.info("Nenhum produto cadastrado no estoque.")
+        st.info("Nenum produto cadastrado no estoque.")
 
 # ---------------------------------------------------------
 # ABA 4: IMPORTAR PEDIDO (CSV)
@@ -303,7 +343,7 @@ elif menu == "📥 Importar Pedido (CSV)":
     
     if arquivo_upload is not None:
         if st.button("🚀 Processar Pedido", use_container_width=True):
-            with st.spinner("Processando itens e calculando frete..."):
+            with st.spinner("Processando itens, calculando frete e gerando preços sugeridos (150% de lucro)..."):
                 df_estoque, sucesso, qtd_itens, frete = processar_csv_upload(arquivo_upload, df_estoque)
                 
             if sucesso:
@@ -311,7 +351,6 @@ elif menu == "📥 Importar Pedido (CSV)":
                 st.success("✅ Pedido processado e adicionado ao estoque!")
                 st.toast("Estoque atualizado com sucesso!", icon="📦")
                 
-                # Exibir Resumo Amigável
                 c1, c2 = st.columns(2)
                 c1.metric("Itens Processados", qtd_itens)
                 c2.metric("Frete Rateado Detectado", f"R$ {frete:.2f}")
