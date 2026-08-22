@@ -185,21 +185,57 @@ menu = st.sidebar.radio(
 
 st.sidebar.markdown("---")
 
-# BOTÃO PARA ZERAR OS DADOS
-if st.sidebar.button("⚠️ Zerar Todos os Dados", key="btn_zerar_dados"):
-    df_estoque_zerado = pd.DataFrame(columns=[
-        'sku', 'nome_produto', 'quantidade_estoque', 
-        'preco_custo_unitario', 'frete_unitario', 'custo_total_unitario', 
-        'preco_venda_unitario', 'margem_porcentagem', 'ultimo_pedido_id'
-    ])
-    df_vendas_zerado = pd.DataFrame(columns=[
-        'id_venda', 'sku', 'nome_produto', 'quantidade_vendida', 
-        'preco_venda_praticado', 'custo_unitario', 'lucro_total_venda', 'data_hora'
-    ])
+# ________________________________
+# EXPORTAÇÃO DE ARQUIVOS CSV
+# ________________________________
+st.sidebar.subheader("📥 Exportar Dados")
+
+csv_estoque = df_estoque.to_csv(index=False).encode('utf-8')
+st.sidebar.download_button(
+    label="📦 Exportar Estoque (estoque.csv)",
+    data=csv_estoque,
+    file_name="estoque.csv",
+    mime="text/csv",
+    use_container_width=True
+)
+
+csv_vendas = df_vendas.to_csv(index=False).encode('utf-8')
+st.sidebar.download_button(
+    label="🛒 Exportar Vendas (vendas.csv)",
+    data=csv_vendas,
+    file_name="vendas.csv",
+    mime="text/csv",
+    use_container_width=True
+)
+
+st.sidebar.markdown("---")
+
+# ________________________________
+# ZERAR DADOS COM VERIFICAÇÃO DE SENHA
+# ________________________________
+SENHA_CORRETA = "TVCHDF*"
+
+with st.sidebar.popover("⚠️ Zerar Todos os Dados"):
+    st.warning("Atenção: Esta ação apaga permanentemente todos os registros de estoque e vendas!")
+    senha_input = st.text_input("Digite a senha para confirmar:", type="password", key="input_senha_zerar")
     
-    salvar_dados(df_estoque_zerado, df_vendas_zerado)
-    st.sidebar.success("Todos os dados foram zerados!")
-    st.rerun()
+    if st.button("Confirmar e Zerar Tudo", type="primary", use_container_width=True):
+        if senha_input == SENHA_CORRETA:
+            df_estoque_zerado = pd.DataFrame(columns=[
+                'sku', 'nome_produto', 'quantidade_estoque', 
+                'preco_custo_unitario', 'frete_unitario', 'custo_total_unitario', 
+                'preco_venda_unitario', 'margem_porcentagem', 'ultimo_pedido_id'
+            ])
+            df_vendas_zerado = pd.DataFrame(columns=[
+                'id_venda', 'sku', 'nome_produto', 'quantidade_vendida', 
+                'preco_venda_praticado', 'custo_unitario', 'lucro_total_venda', 'data_hora'
+            ])
+            
+            salvar_dados(df_estoque_zerado, df_vendas_zerado)
+            st.success("Todos os dados foram zerados com sucesso!")
+            st.rerun()
+        else:
+            st.error("❌ Senha incorreta! Os dados não foram alterados.")
 
 # ________________________________
 # ABA 1: DASHBOARD & KPIS
