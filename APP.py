@@ -67,7 +67,7 @@ def salvar_dados(df_estoque, df_vendas):
 
     # Sincronização automática com GitHub API via Secrets ou Token direto
     token = st.secrets.get("GITHUB_TOKEN", "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")
-    repo_name = st.secrets.get("REPO_NAME", "HugoFigueira-Dados/Controle-de-Sell-In-Out")
+    repo_name = st.secrets.get("REPO_NAME", "hugozizzfuark-max/th-variedades")
 
     if token and repo_name:
         try:
