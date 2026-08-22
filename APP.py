@@ -4,7 +4,6 @@ import unicodedata
 from datetime import datetime
 import os
 import re
-import plotly.express as px
 
 # ________________________________
 # CONFIGURAÇÃO DA PÁGINA STREAMLIT
@@ -273,18 +272,15 @@ if menu == "📊 Dashboard & KPIs":
     df_vendas_f = df_vendas.copy()
     df_estoque_f = df_estoque.copy()
 
-    # 1. Filtro por Produto
     if produto_sel != "Todos":
         df_vendas_f = df_vendas_f[df_vendas_f['nome_produto'] == produto_sel]
         df_estoque_f = df_estoque_f[df_estoque_f['nome_produto'] == produto_sel]
 
-    # 2. Filtro por Lote/Pedido
     if lote_sel != "Todos":
         skus_do_lote = df_estoque[df_estoque['ultimo_pedido_id'] == lote_sel]['sku'].tolist()
         df_vendas_f = df_vendas_f[df_vendas_f['sku'].isin(skus_do_lote)]
         df_estoque_f = df_estoque_f[df_estoque_f['ultimo_pedido_id'] == lote_sel]
 
-    # 3. Filtro por Data
     if isinstance(datas_filtro, (list, tuple)) and len(datas_filtro) == 2:
         d_inicio, d_fim = datas_filtro
         if 'data_hora_dt' in df_vendas_f.columns:
@@ -320,7 +316,7 @@ if menu == "📊 Dashboard & KPIs":
     st.markdown("---")
 
     # --------------------------------
-    # GRÁFICO DE TOP 5 PRODUTOS (MAIS/MENOS VENDIDOS)
+    # GRÁFICO NATIVO DO STREAMLIT (TOP 5 MAIS / MENOS VENDIDOS)
     # --------------------------------
     st.subheader("📊 Análise de Desempenho dos Produtos")
     
@@ -328,65 +324,31 @@ if menu == "📊 Dashboard & KPIs":
         g_col1, g_col2 = st.columns([1, 3])
         
         with g_col1:
-            st.markdown("##### Configuração do Gráfico")
-            
-            # Botão / Controle para alternar
-            if hasattr(st, "segmented_control"):
-                opcao_top = st.segmented_control(
-                    "Visualizar:", 
-                    options=["🔥 Top 5 Mais Vendidos", "❄️ Top 5 Menos Vendidos"],
-                    default="🔥 Top 5 Mais Vendidos"
-                )
-            else:
-                opcao_top = st.radio(
-                    "Visualizar:", 
-                    options=["🔥 Top 5 Mais Vendidos", "❄️ Top 5 Menos Vendidos"]
-                )
+            st.markdown("##### Visualização")
+            opcao_top = st.radio(
+                "Filtrar Rank:", 
+                options=["🔥 Top 5 Mais Vendidos", "❄️ Top 5 Menos Vendidos"],
+                key="radio_top_produtos"
+            )
 
-        # Agrupando Vendas por Produto
+        # Agrupamento dos dados
         vendas_agrupadas = df_vendas_f.groupby(['sku', 'nome_produto'])['quantidade_vendida'].sum().reset_index()
+        vendas_agrupadas['Produto'] = vendas_agrupadas['sku'] + " - " + vendas_agrupadas['nome_produto']
         
         is_top = "Mais" in opcao_top
         vendas_agrupadas = vendas_agrupadas.sort_values(
             by='quantidade_vendida', 
             ascending=not is_top
         ).head(5)
-        
-        # Inverter para exibir o maior no topo do gráfico horizontal
-        vendas_agrupadas = vendas_agrupadas.sort_values(by='quantidade_vendida', ascending=True)
 
-        vendas_agrupadas['rótulo'] = vendas_agrupadas['sku'] + " - " + vendas_agrupadas['nome_produto']
-
-        esquema_cor = "Blues" if is_top else "Reds"
-        
-        fig = px.bar(
-            vendas_agrupadas,
-            x='quantidade_vendida',
-            y='rótulo',
-            orientation='h',
-            text='quantidade_vendida',
-            title=f"<b>{'Top 5 Produtos Mais Vendidos' if is_top else 'Top 5 Produtos Menos Vendidos'}</b>",
-            labels={'quantidade_vendida': 'Unidades Vendidas', 'rótulo': 'Produto'},
-            color='quantidade_vendida',
-            color_continuous_scale=esquema_cor
-        )
-
-        fig.update_traces(textposition='outside', texttemplate='%{text} un')
-        fig.update_layout(
-            showlegend=False,
-            height=320,
-            margin=dict(l=20, r=20, t=40, b=20),
-            xaxis_title="",
-            yaxis_title="",
-            coloraxis_showscale=False,
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)'
-        )
+        # Prepara estrutura para gráfico de barras do Streamlit
+        chart_data = vendas_agrupadas.set_index('Produto')[['quantidade_vendida']]
+        chart_data.columns = ['Qtd. Vendida']
 
         with g_col2:
-            st.plotly_chart(fig, use_container_width=True)
+            st.bar_chart(chart_data, color="#0066CC" if is_top else "#FF4B4B")
     else:
-        st.info("Nenhum dado de venda disponível no momento ou para o filtro selecionado para gerar o gráfico.")
+        st.info("Nenhum dado de venda disponível no momento para gerar o gráfico.")
 
     st.markdown("---")
     st.subheader("📋 Histórico Recente de Vendas")
