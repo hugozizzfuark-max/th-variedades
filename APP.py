@@ -380,7 +380,7 @@ elif menu == "📦 Estoque & Preços":
     st.title("📦 Gerenciamento de Estoque e Margens")
     
     if not df_estoque.empty:
-        st.caption("💡 Edite os valores e clique em **Salvar Alterações nos Preços**.")
+        st.caption("💡 Edite o nome dos produtos ou preços na tabela e clique em **Salvar Alterações**.")
 
         df_display = df_estoque.copy()
         df_display['margem_porcentagem'] = df_display.apply(
@@ -392,7 +392,8 @@ elif menu == "📦 Estoque & Preços":
             df_display,
             column_config={
                 "sku": st.column_config.TextColumn("SKU", disabled=True),
-                "nome_produto": st.column_config.TextColumn("Produto", disabled=True),
+                # Agora o nome do produto está editável para correções:
+                "nome_produto": st.column_config.TextColumn("Produto", disabled=False),
                 "quantidade_estoque": st.column_config.NumberColumn("Estoque Atual", disabled=True),
                 "preco_custo_unitario": st.column_config.NumberColumn("Custo Nota (R$)", disabled=True, format="R$ %.2f"),
                 "frete_unitario": st.column_config.NumberColumn("Frete Unit. (R$)", disabled=True, format="R$ %.2f"),
@@ -406,9 +407,9 @@ elif menu == "📦 Estoque & Preços":
             key="tabela_editor_interativo"
         )
 
-        if st.button("💾 Salvar Alterações nos Preços", use_container_width=True):
+        if st.button("💾 Salvar Alterações", use_container_width=True):
             salvar_dados(edited_df, df_vendas)
-            st.toast("Preços salvos no Google Sheets!", icon="✅")
+            st.toast("Estoque e nomes atualizados no Google Sheets!", icon="✅")
             st.rerun()
     else:
         st.info("O estoque está vazio.")
