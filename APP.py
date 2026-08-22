@@ -4,6 +4,7 @@ import unicodedata
 from datetime import datetime
 import os
 import re
+import plotly.express as px
 
 # ________________________________
 # CONFIGURAÇÃO DA PÁGINA STREAMLIT
@@ -48,7 +49,10 @@ def carregar_estoque():
 
 def carregar_vendas():
     if os.path.exists(ARQUIVO_VENDAS):
-        return pd.read_csv(ARQUIVO_VENDAS, dtype={'sku': str, 'id_venda': str})
+        df = pd.read_csv(ARQUIVO_VENDAS, dtype={'sku': str, 'id_venda': str})
+        if not df.empty and 'data_hora' in df.columns:
+            df['data_hora_dt'] = pd.to_datetime(df['data_hora'], errors='coerce')
+        return df
     else:
         return pd.DataFrame(columns=[
             'id_venda', 'sku', 'nome_produto', 'quantidade_vendida', 
@@ -61,8 +65,11 @@ def salvar_dados(df_estoque, df_vendas):
             lambda row: round(((row['preco_venda_unitario'] - row['custo_total_unitario']) / row['custo_total_unitario']) * 100, 2)
             if row['custo_total_unitario'] > 0 else 0.0, axis=1
         )
-    df_estoque.to_csv(ARQUIVO_ESTOQUE, index=False)
-    df_vendas.to_csv(ARQUIVO_VENDAS, index=False)
+    df_estoque_salvar = df_estoque.drop(columns=['data_hora_dt'], errors='ignore')
+    df_vendas_salvar = df_vendas.drop(columns=['data_hora_dt'], errors='ignore')
+    
+    df_estoque_salvar.to_csv(ARQUIVO_ESTOQUE, index=False)
+    df_vendas_salvar.to_csv(ARQUIVO_VENDAS, index=False)
 
 def processar_csv_upload(uploaded_file, df_estoque):
     try:
@@ -243,16 +250,63 @@ with st.sidebar.popover("⚠️ Zerar Todos os Dados"):
 if menu == "📊 Dashboard & KPIs":
     st.title("📊 Painel Geral de Vendas e Previsões")
     
-    faturamento_real = (df_vendas['quantidade_vendida'] * df_vendas['preco_venda_praticado']).sum() if not df_vendas.empty else 0.0
-    lucro_real = df_vendas['lucro_total_venda'].sum() if not df_vendas.empty else 0.0
-    custo_total_vendido = (df_vendas['quantidade_vendida'] * df_vendas['custo_unitario']).sum() if not df_vendas.empty else 0.0
+    # --------------------------------
+    # FILTROS DINÂMICOS
+    # --------------------------------
+    with st.expander("🔍 **Filtros do Dashboard**", expanded=True):
+        f_col1, f_col2, f_col3 = st.columns(3)
+        
+        # Filtro de Produto
+        produtos_disponiveis = ["Todos"] + sorted(list(set(
+            df_estoque['nome_produto'].tolist() + df_vendas['nome_produto'].tolist()
+        )))
+        produto_sel = f_col1.selectbox("Filtrar por Produto:", produtos_disponiveis)
+        
+        # Filtro por Lote/Pedido
+        lotes_disponiveis = ["Todos"] + sorted([l for l in df_estoque['ultimo_pedido_id'].dropna().unique() if str(l).strip() != ""])
+        lote_sel = f_col2.selectbox("Filtrar por Lote/Pedido:", lotes_disponiveis)
+        
+        # Filtro por Data
+        datas_filtro = f_col3.date_input("Filtrar por Intervalo de Datas (Vendas):", value=(), key="filtro_datas")
+
+    # Aplicação dos Filtros nos DataFrames
+    df_vendas_f = df_vendas.copy()
+    df_estoque_f = df_estoque.copy()
+
+    # 1. Filtro por Produto
+    if produto_sel != "Todos":
+        df_vendas_f = df_vendas_f[df_vendas_f['nome_produto'] == produto_sel]
+        df_estoque_f = df_estoque_f[df_estoque_f['nome_produto'] == produto_sel]
+
+    # 2. Filtro por Lote/Pedido
+    if lote_sel != "Todos":
+        skus_do_lote = df_estoque[df_estoque['ultimo_pedido_id'] == lote_sel]['sku'].tolist()
+        df_vendas_f = df_vendas_f[df_vendas_f['sku'].isin(skus_do_lote)]
+        df_estoque_f = df_estoque_f[df_estoque_f['ultimo_pedido_id'] == lote_sel]
+
+    # 3. Filtro por Data
+    if isinstance(datas_filtro, (list, tuple)) and len(datas_filtro) == 2:
+        d_inicio, d_fim = datas_filtro
+        if 'data_hora_dt' in df_vendas_f.columns:
+            df_vendas_f = df_vendas_f[
+                (df_vendas_f['data_hora_dt'].dt.date >= d_inicio) & 
+                (df_vendas_f['data_hora_dt'].dt.date <= d_fim)
+            ]
+
+    # --------------------------------
+    # CÁLCULO DOS KPIS FILTRADOS
+    # --------------------------------
+    faturamento_real = (df_vendas_f['quantidade_vendida'] * df_vendas_f['preco_venda_praticado']).sum() if not df_vendas_f.empty else 0.0
+    lucro_real = df_vendas_f['lucro_total_venda'].sum() if not df_vendas_f.empty else 0.0
+    custo_total_vendido = (df_vendas_f['quantidade_vendida'] * df_vendas_f['custo_unitario']).sum() if not df_vendas_f.empty else 0.0
     margem_real_pct = (lucro_real / custo_total_vendido * 100) if custo_total_vendido > 0 else 0.0
     
-    prev_faturamento = (df_estoque['quantidade_estoque'] * df_estoque['preco_venda_unitario']).sum() if not df_estoque.empty else 0.0
-    prev_custo_estoque = (df_estoque['quantidade_estoque'] * df_estoque['custo_total_unitario']).sum() if not df_estoque.empty else 0.0
+    prev_faturamento = (df_estoque_f['quantidade_estoque'] * df_estoque_f['preco_venda_unitario']).sum() if not df_estoque_f.empty else 0.0
+    prev_custo_estoque = (df_estoque_f['quantidade_estoque'] * df_estoque_f['custo_total_unitario']).sum() if not df_estoque_f.empty else 0.0
     prev_lucro = prev_faturamento - prev_custo_estoque
     margem_estoque_pct = (prev_lucro / prev_custo_estoque * 100) if prev_custo_estoque > 0 else 0.0
-    
+
+    st.markdown("---")
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Faturamento Realizado", f"R$ {faturamento_real:.2f}")
     col2.metric("Lucro Realizado", f"R$ {lucro_real:.2f}")
@@ -264,11 +318,83 @@ if menu == "📊 Dashboard & KPIs":
     col_m2.metric("📦 % Margem de Lucro Projetada", f"{margem_estoque_pct:.2f}%")
 
     st.markdown("---")
-    st.subheader("📋 Histórico Recente de Vendas")
-    if not df_vendas.empty:
-        st.dataframe(df_vendas.sort_values(by="data_hora", ascending=False), use_container_width=True)
+
+    # --------------------------------
+    # GRÁFICO DE TOP 5 PRODUTOS (MAIS/MENOS VENDIDOS)
+    # --------------------------------
+    st.subheader("📊 Análise de Desempenho dos Produtos")
+    
+    if not df_vendas_f.empty:
+        g_col1, g_col2 = st.columns([1, 3])
+        
+        with g_col1:
+            st.markdown("##### Configuração do Gráfico")
+            
+            # Botão / Controle para alternar
+            if hasattr(st, "segmented_control"):
+                opcao_top = st.segmented_control(
+                    "Visualizar:", 
+                    options=["🔥 Top 5 Mais Vendidos", "❄️ Top 5 Menos Vendidos"],
+                    default="🔥 Top 5 Mais Vendidos"
+                )
+            else:
+                opcao_top = st.radio(
+                    "Visualizar:", 
+                    options=["🔥 Top 5 Mais Vendidos", "❄️ Top 5 Menos Vendidos"]
+                )
+
+        # Agrupando Vendas por Produto
+        vendas_agrupadas = df_vendas_f.groupby(['sku', 'nome_produto'])['quantidade_vendida'].sum().reset_index()
+        
+        is_top = "Mais" in opcao_top
+        vendas_agrupadas = vendas_agrupadas.sort_values(
+            by='quantidade_vendida', 
+            ascending=not is_top
+        ).head(5)
+        
+        # Inverter para exibir o maior no topo do gráfico horizontal
+        vendas_agrupadas = vendas_agrupadas.sort_values(by='quantidade_vendida', ascending=True)
+
+        vendas_agrupadas['rótulo'] = vendas_agrupadas['sku'] + " - " + vendas_agrupadas['nome_produto']
+
+        esquema_cor = "Blues" if is_top else "Reds"
+        
+        fig = px.bar(
+            vendas_agrupadas,
+            x='quantidade_vendida',
+            y='rótulo',
+            orientation='h',
+            text='quantidade_vendida',
+            title=f"<b>{'Top 5 Produtos Mais Vendidos' if is_top else 'Top 5 Produtos Menos Vendidos'}</b>",
+            labels={'quantidade_vendida': 'Unidades Vendidas', 'rótulo': 'Produto'},
+            color='quantidade_vendida',
+            color_continuous_scale=esquema_cor
+        )
+
+        fig.update_traces(textposition='outside', texttemplate='%{text} un')
+        fig.update_layout(
+            showlegend=False,
+            height=320,
+            margin=dict(l=20, r=20, t=40, b=20),
+            xaxis_title="",
+            yaxis_title="",
+            coloraxis_showscale=False,
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)'
+        )
+
+        with g_col2:
+            st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("Nenhuma venda registrada até o momento.")
+        st.info("Nenhum dado de venda disponível no momento ou para o filtro selecionado para gerar o gráfico.")
+
+    st.markdown("---")
+    st.subheader("📋 Histórico Recente de Vendas")
+    if not df_vendas_f.empty:
+        df_exibicao = df_vendas_f.drop(columns=['data_hora_dt'], errors='ignore')
+        st.dataframe(df_exibicao.sort_values(by="data_hora", ascending=False), use_container_width=True)
+    else:
+        st.info("Nenhuma venda encontrada para os filtros selecionados.")
 
 # ________________________________
 # ABA 2: ESTOQUE E PREÇOS
