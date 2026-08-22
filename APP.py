@@ -57,24 +57,24 @@ def carregar_vendas():
         ])
 
 def salvar_dados(df_estoque, df_vendas):
-    # Recalcula a margem % em relação ao Custo Total
     if not df_estoque.empty:
         df_estoque['margem_porcentagem'] = df_estoque.apply(
             lambda row: round(((row['preco_venda_unitario'] - row['custo_total_unitario']) / row['custo_total_unitario']) * 100, 2)
             if row['custo_total_unitario'] > 0 else 0.0, axis=1
         )
-    
-    # 1. Salva localmente na sessão do servidor Streamlit
     df_estoque.to_csv(ARQUIVO_ESTOQUE, index=False)
     df_vendas.to_csv(ARQUIVO_VENDAS, index=False)
 
-    # 2. Faz o commit/sincronização automática no repositório do GitHub
-    if "GITHUB_TOKEN" in st.secrets and "REPO_NAME" in st.secrets:
+    # Sincronização automática com GitHub API via Secrets ou Token direto
+    token = st.secrets.get("GITHUB_TOKEN", "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")
+    repo_name = st.secrets.get("REPO_NAME", "HugoFigueira-Dados/Controle-de-Sell-In-Out")
+
+    if token and repo_name:
         try:
-            g = Github(st.secrets["GITHUB_TOKEN"])
-            repo = g.get_repo(st.secrets["REPO_NAME"])
+            g = Github(token)
+            repo = g.get_repo(repo_name)
             
-            # Sincronizar estoque.csv
+            # Atualizar estoque.csv no GitHub
             conteudo_estoque = df_estoque.to_csv(index=False)
             try:
                 file_estoque = repo.get_contents(ARQUIVO_ESTOQUE)
@@ -82,7 +82,7 @@ def salvar_dados(df_estoque, df_vendas):
             except Exception:
                 repo.create_file(ARQUIVO_ESTOQUE, "Cria estoque.csv via Streamlit", conteudo_estoque)
 
-            # Sincronizar vendas.csv
+            # Atualizar vendas.csv no GitHub
             conteudo_vendas = df_vendas.to_csv(index=False)
             try:
                 file_vendas = repo.get_contents(ARQUIVO_VENDAS)
@@ -91,7 +91,7 @@ def salvar_dados(df_estoque, df_vendas):
                 repo.create_file(ARQUIVO_VENDAS, "Cria vendas.csv via Streamlit", conteudo_vendas)
 
         except Exception as e:
-            st.error(f"⚠️ Erro ao sincronizar dados com o GitHub: {e}")
+            st.error(f"Erro ao sincronizar dados com o GitHub: {e}")
 
 def processar_csv_upload(uploaded_file, df_estoque):
     try:
@@ -203,13 +203,13 @@ df_vendas = carregar_vendas()
 # ________________________________
 # INTERFACE GRÁFICA (SIDEBAR E NAVEGAÇÃO)
 # ________________________________
-st.sidebar.title("🛍️ XZ Variedades")
+st.sidebar.title("🛍️ TH Variedades")
 st.sidebar.markdown("---")
 
 menu = st.sidebar.radio(
     "Navegação", 
     ["📊 Dashboard & KPIs", "📦 Estoque & Preços", "🛒 Registrar Venda", "📥 Importar Pedido (CSV)"],
-    key="menu_principal_xz"
+    key="menu_principal_th"
 )
 
 st.sidebar.markdown("---")
