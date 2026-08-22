@@ -14,6 +14,8 @@ st.set_page_config(
     layout="wide"
 )
 
+URL_PLANILHA = "https://docs.google.com/spreadsheets/d/1sVaYzTGxjS_Z0l2Nb2CFCJ2DG51CQ7ejkoEeZf3vxSs/edit?gid=1291479590#gid=1291479590"
+
 # Inicializa conexão com o Google Sheets
 conn = st.connection("gsheets", type=GSheetsConnection)
 
@@ -33,10 +35,11 @@ def limpar_nome_produto(nome):
     nome_limpo = re.sub(r'^\d+\s*(\(un\))?\s*(x)?\s*', '', nome_limpo, flags=re.IGNORECASE)
     return nome_limpo.strip()
 
+# CACHE INTELIGENTE: Guarda os dados na memória para o app rodar ultrarrápido
+@st.cache_data(ttl=300)
 def carregar_estoque():
     try:
-        # Lê a aba 'estoque' da planilha no Google Sheets (ttl=0 desativa cache para pegar atualizado)
-        df = conn.read(worksheet="estoque", ttl=0)
+        df = conn.read(spreadsheet=URL_PLANILHA, worksheet="estoque", ttl=0)
         if df.empty:
             return pd.DataFrame(columns=[
                 'sku', 'nome_produto', 'quantidade_estoque', 
@@ -48,18 +51,17 @@ def carregar_estoque():
         if 'margem_porcentagem' not in df.columns:
             df['margem_porcentagem'] = 0.0
         return df
-    except Exception as e:
-        st.error(f"Erro ao carregar estoque do Google Sheets: {e}")
+    except Exception:
         return pd.DataFrame(columns=[
             'sku', 'nome_produto', 'quantidade_estoque', 
             'preco_custo_unitario', 'frete_unitario', 'custo_total_unitario', 
             'preco_venda_unitario', 'margem_porcentagem', 'ultimo_pedido_id'
         ])
 
+@st.cache_data(ttl=300)
 def carregar_vendas():
     try:
-        # Lê a aba 'vendas' da planilha no Google Sheets
-        df = conn.read(worksheet="vendas", ttl=0)
+        df = conn.read(spreadsheet=URL_PLANILHA, worksheet="vendas", ttl=0)
         if df.empty:
             return pd.DataFrame(columns=[
                 'id_venda', 'sku', 'nome_produto', 'quantidade_vendida', 
@@ -70,8 +72,7 @@ def carregar_vendas():
         if not df.empty and 'data_hora' in df.columns:
             df['data_hora_dt'] = pd.to_datetime(df['data_hora'], errors='coerce')
         return df
-    except Exception as e:
-        st.error(f"Erro ao carregar vendas do Google Sheets: {e}")
+    except Exception:
         return pd.DataFrame(columns=[
             'id_venda', 'sku', 'nome_produto', 'quantidade_vendida', 
             'preco_venda_praticado', 'custo_unitario', 'lucro_total_venda', 'data_hora'
@@ -86,9 +87,12 @@ def salvar_dados(df_estoque, df_vendas):
     df_estoque_salvar = df_estoque.drop(columns=['data_hora_dt'], errors='ignore')
     df_vendas_salvar = df_vendas.drop(columns=['data_hora_dt'], errors='ignore')
     
-    # Atualiza as abas no Google Sheets
-    conn.update(worksheet="estoque", data=df_estoque_salvar)
-    conn.update(worksheet="vendas", data=df_vendas_salvar)
+    # Atualiza a planilha
+    conn.update(spreadsheet=URL_PLANILHA, worksheet="estoque", data=df_estoque_salvar)
+    conn.update(spreadsheet=URL_PLANILHA, worksheet="vendas", data=df_vendas_salvar)
+    
+    # Limpa o cache local para carregar os dados novos imediatamente
+    st.cache_data.clear()
 
 def processar_csv_upload(uploaded_file, df_estoque):
     try:
@@ -192,7 +196,7 @@ def processar_csv_upload(uploaded_file, df_estoque):
         return df_estoque, False, 0, 0.0
 
 # ________________________________
-# CARREGAR DADOS DO GOOGLE SHEETS
+# CARREGAR DADOS COM CACHE
 # ________________________________
 df_estoque = carregar_estoque()
 df_vendas = carregar_vendas()
@@ -200,7 +204,14 @@ df_vendas = carregar_vendas()
 # ________________________________
 # INTERFACE GRÁFICA (SIDEBAR E NAVEGAÇÃO)
 # ________________________________
-st.sidebar.title("📦 TH Gestão de Vendas & PDV")
+st.sidebar.title("📦 TH Gestão & PDV")
+
+# BOTÃO DE ATUALIZAR DADOS (Sincronização com ícone)
+if st.sidebar.button("🔄 Sincronizar / Atualizar Dados", use_container_width=True):
+    st.cache_data.clear()
+    st.toast("Dados atualizados do Google Sheets!", icon="🔄")
+    st.rerun()
+
 st.sidebar.markdown("---")
 
 menu = st.sidebar.radio(
@@ -258,10 +269,10 @@ with st.sidebar.popover("⚠️ Zerar Todos os Dados"):
             ])
             
             salvar_dados(df_estoque_zerado, df_vendas_zerado)
-            st.success("Todos os dados foram zerados com sucesso no Google Sheets!")
+            st.success("Todos os dados foram zerados com sucesso!")
             st.rerun()
         else:
-            st.error("❌ Senha incorreta! Os dados não foram alterados.")
+            st.error("❌ Senha incorreta!")
 
 # ________________________________
 # ABA 1: DASHBOARD & KPIS
@@ -269,26 +280,19 @@ with st.sidebar.popover("⚠️ Zerar Todos os Dados"):
 if menu == "📊 Dashboard & KPIs":
     st.title("📊 Painel Geral de Vendas e Previsões")
     
-    # --------------------------------
-    # FILTROS DINÂMICOS
-    # --------------------------------
     with st.expander("🔍 **Filtros do Dashboard**", expanded=True):
         f_col1, f_col2, f_col3 = st.columns(3)
         
-        # Filtro de Produto
         produtos_disponiveis = ["Todos"] + sorted(list(set(
             df_estoque['nome_produto'].dropna().tolist() + df_vendas['nome_produto'].dropna().tolist()
         )))
         produto_sel = f_col1.selectbox("Filtrar por Produto:", produtos_disponiveis)
         
-        # Filtro por Lote/Pedido
         lotes_disponiveis = ["Todos"] + sorted([l for l in df_estoque['ultimo_pedido_id'].dropna().unique() if str(l).strip() != ""])
         lote_sel = f_col2.selectbox("Filtrar por Lote/Pedido:", lotes_disponiveis)
         
-        # Filtro por Data
         datas_filtro = f_col3.date_input("Filtrar por Intervalo de Datas (Vendas):", value=(), key="filtro_datas")
 
-    # Aplicação dos Filtros nos DataFrames
     df_vendas_f = df_vendas.copy()
     df_estoque_f = df_estoque.copy()
 
@@ -309,9 +313,6 @@ if menu == "📊 Dashboard & KPIs":
                 (df_vendas_f['data_hora_dt'].dt.date <= d_fim)
             ]
 
-    # --------------------------------
-    # CÁLCULO DOS KPIS FILTRADOS
-    # --------------------------------
     faturamento_real = (df_vendas_f['quantidade_vendida'] * df_vendas_f['preco_venda_praticado']).sum() if not df_vendas_f.empty else 0.0
     lucro_real = df_vendas_f['lucro_total_venda'].sum() if not df_vendas_f.empty else 0.0
     custo_total_vendido = (df_vendas_f['quantidade_vendida'] * df_vendas_f['custo_unitario']).sum() if not df_vendas_f.empty else 0.0
@@ -334,10 +335,6 @@ if menu == "📊 Dashboard & KPIs":
     col_m2.metric("📦 % Margem de Lucro Projetada", f"{margem_estoque_pct:.2f}%")
 
     st.markdown("---")
-
-    # --------------------------------
-    # GRÁFICO NATIVO DO STREAMLIT (TOP 5 MAIS / MENOS VENDIDOS)
-    # --------------------------------
     st.subheader("📊 Análise de Desempenho dos Produtos")
     
     if not df_vendas_f.empty:
@@ -366,7 +363,7 @@ if menu == "📊 Dashboard & KPIs":
         with g_col2:
             st.bar_chart(chart_data, color="#0066CC" if is_top else "#FF4B4B")
     else:
-        st.info("Nenhum dado de venda disponível no momento para gerar o gráfico.")
+        st.info("Nenhum dado de venda disponível no momento.")
 
     st.markdown("---")
     st.subheader("📋 Histórico Recente de Vendas")
@@ -374,7 +371,7 @@ if menu == "📊 Dashboard & KPIs":
         df_exibicao = df_vendas_f.drop(columns=['data_hora_dt'], errors='ignore')
         st.dataframe(df_exibicao.sort_values(by="data_hora", ascending=False), use_container_width=True)
     else:
-        st.info("Nenhuma venda encontrada para os filtros selecionados.")
+        st.info("Nenhuma venda encontrada.")
 
 # ________________________________
 # ABA 2: ESTOQUE E PREÇOS
@@ -383,7 +380,7 @@ elif menu == "📦 Estoque & Preços":
     st.title("📦 Gerenciamento de Estoque e Margens")
     
     if not df_estoque.empty:
-        st.caption("💡 Edite os valores na tabela e clique no botão **Salvar Alterações nos Preços** para confirmar.")
+        st.caption("💡 Edite os valores e clique em **Salvar Alterações nos Preços**.")
 
         df_display = df_estoque.copy()
         df_display['margem_porcentagem'] = df_display.apply(
@@ -411,13 +408,13 @@ elif menu == "📦 Estoque & Preços":
 
         if st.button("💾 Salvar Alterações nos Preços", use_container_width=True):
             salvar_dados(edited_df, df_vendas)
-            st.toast("Preços e margens salvos no Google Sheets!", icon="✅")
+            st.toast("Preços salvos no Google Sheets!", icon="✅")
             st.rerun()
     else:
-        st.info("O estoque está vazio. Importe um pedido em CSV para começar.")
+        st.info("O estoque está vazio.")
 
 # ________________________________
-# ABA 3: REGISTRAR VENDA (PDV)
+# ABA 3: REGISTRAR VENDA (PDV) - COM CONSULTA EM CARD
 # ________________________________
 elif menu == "🛒 Registrar Venda":
     st.title("🛒 Baixa Rápida de Venda")
@@ -433,13 +430,27 @@ elif menu == "🛒 Registrar Venda":
             
             item = df_estoque[df_estoque['sku'] == sku_selecionado].iloc[0]
             
+            # -------------------------------------------------------------
+            # CARD DE CONSULTA DE PREÇO DO PRODUTO SELECIONADO
+            # -------------------------------------------------------------
+            st.markdown("##### 🔍 Consulta do Produto Selecionado")
+            card_col1, card_col2, card_col3 = st.columns(3)
+            
+            preco_tabela = float(item['preco_venda_unitario'])
+            custo_tot = float(item['custo_total_unitario'])
+            
+            card_col1.metric("🏷️ Preço Cadastrado (Tabela)", f"R$ {preco_tabela:.2f}")
+            card_col2.metric("💲 Custo Unitário Total", f"R$ {custo_tot:.2f}")
+            card_col3.metric("📦 Quantidade em Estoque", f"{int(item['quantidade_estoque'])} un")
+            st.markdown("---")
+
             col_a, col_b = st.columns(2)
             with col_a:
                 qtd_venda = st.number_input("Quantidade Vendida:", min_value=1, max_value=int(item['quantidade_estoque']), value=1)
             with col_b:
-                preco_venda_input = st.number_input("Preço Praticado por Unidade (R$):", min_value=0.0, value=float(item['preco_venda_unitario']))
+                preco_venda_input = st.number_input("Preço Praticado nesta Venda (R$):", min_value=0.0, value=preco_tabela)
 
-            lucro_estimado = (preco_venda_input - item['custo_total_unitario']) * qtd_venda
+            lucro_estimado = (preco_venda_input - custo_tot) * qtd_venda
             st.info(f"💰 Lucro total nesta transação: **R$ {lucro_estimado:.2f}**")
 
             if st.button("✅ Confirmar Venda", use_container_width=True):
@@ -453,17 +464,17 @@ elif menu == "🛒 Registrar Venda":
                     'nome_produto': item['nome_produto'],
                     'quantidade_vendida': qtd_venda,
                     'preco_venda_praticado': preco_venda_input,
-                    'custo_unitario': item['custo_total_unitario'],
+                    'custo_unitario': custo_tot,
                     'lucro_total_venda': round(lucro_estimado, 2),
                     'data_hora': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 }
                 df_vendas = pd.concat([df_vendas, pd.DataFrame([nova_venda])], ignore_index=True)
                 
                 salvar_dados(df_estoque, df_vendas)
-                st.toast(f"Venda de {qtd_venda}x '{item['nome_produto']}' registrada no Google Sheets!", icon="🎉")
+                st.toast(f"Venda de {qtd_venda}x '{item['nome_produto']}' registrada!", icon="🎉")
                 st.rerun()
         else:
-            st.warning("⚠️ Todos os produtos cadastrados estão com o estoque zerado.")
+            st.warning("⚠️ Todos os produtos cadastrados estão com estoque zerado.")
     else:
         st.info("Nenhum produto cadastrado no estoque.")
 
@@ -478,13 +489,13 @@ elif menu == "📥 Importar Pedido (CSV)":
     
     if arquivo_upload is not None:
         if st.button("🚀 Processar Pedido", use_container_width=True):
-            with st.spinner("Processando itens e salvando no Google Sheets..."):
+            with st.spinner("Processando itens..."):
                 df_estoque, sucesso, qtd_itens, frete = processar_csv_upload(arquivo_upload, df_estoque)
                 
                 if sucesso:
                     salvar_dados(df_estoque, df_vendas)
-                    st.success("✅ Pedido processado e adicionado ao estoque no Google Sheets!")
-                    st.toast("Estoque atualizado com sucesso!", icon="📦")
+                    st.success("✅ Pedido processado com sucesso!")
+                    st.toast("Estoque atualizado!", icon="📦")
                     
                     c1, c2 = st.columns(2)
                     c1.metric("Itens Processados", qtd_itens)
