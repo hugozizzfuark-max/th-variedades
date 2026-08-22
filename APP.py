@@ -213,7 +213,7 @@ st.sidebar.markdown("---")
 # ________________________________
 # ZERAR DADOS COM VERIFICAÇÃO DE SENHA
 # ________________________________
-SENHA_CORRETA = "TVCHDF*"
+SENHA_CORRETA = "TVCHDF16*"
 
 with st.sidebar.popover("⚠️ Zerar Todos os Dados"):
     st.warning("Atenção: Esta ação apaga permanentemente todos os registros de estoque e vendas!")
