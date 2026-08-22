@@ -4,6 +4,7 @@ import unicodedata
 from datetime import datetime
 import os
 import re
+from github import Github
 
 # ________________________________
 # CONFIGURAÇÃO DA PÁGINA STREAMLIT
@@ -56,13 +57,41 @@ def carregar_vendas():
         ])
 
 def salvar_dados(df_estoque, df_vendas):
+    # Recalcula a margem % em relação ao Custo Total
     if not df_estoque.empty:
         df_estoque['margem_porcentagem'] = df_estoque.apply(
             lambda row: round(((row['preco_venda_unitario'] - row['custo_total_unitario']) / row['custo_total_unitario']) * 100, 2)
             if row['custo_total_unitario'] > 0 else 0.0, axis=1
         )
+    
+    # 1. Salva localmente na sessão do servidor Streamlit
     df_estoque.to_csv(ARQUIVO_ESTOQUE, index=False)
     df_vendas.to_csv(ARQUIVO_VENDAS, index=False)
+
+    # 2. Faz o commit/sincronização automática no repositório do GitHub
+    if "GITHUB_TOKEN" in st.secrets and "REPO_NAME" in st.secrets:
+        try:
+            g = Github(st.secrets["GITHUB_TOKEN"])
+            repo = g.get_repo(st.secrets["REPO_NAME"])
+            
+            # Sincronizar estoque.csv
+            conteudo_estoque = df_estoque.to_csv(index=False)
+            try:
+                file_estoque = repo.get_contents(ARQUIVO_ESTOQUE)
+                repo.update_file(file_estoque.path, "Atualiza estoque.csv via Streamlit", conteudo_estoque, file_estoque.sha)
+            except Exception:
+                repo.create_file(ARQUIVO_ESTOQUE, "Cria estoque.csv via Streamlit", conteudo_estoque)
+
+            # Sincronizar vendas.csv
+            conteudo_vendas = df_vendas.to_csv(index=False)
+            try:
+                file_vendas = repo.get_contents(ARQUIVO_VENDAS)
+                repo.update_file(file_vendas.path, "Atualiza vendas.csv via Streamlit", conteudo_vendas, file_vendas.sha)
+            except Exception:
+                repo.create_file(ARQUIVO_VENDAS, "Cria vendas.csv via Streamlit", conteudo_vendas)
+
+        except Exception as e:
+            st.error(f"⚠️ Erro ao sincronizar dados com o GitHub: {e}")
 
 def processar_csv_upload(uploaded_file, df_estoque):
     try:
@@ -71,7 +100,7 @@ def processar_csv_upload(uploaded_file, df_estoque):
             if len(df_novo.columns) < 2:
                 uploaded_file.seek(0)
                 df_novo = pd.read_csv(uploaded_file, sep=';')
-        except:
+        except Exception:
             uploaded_file.seek(0)
             df_novo = pd.read_csv(uploaded_file, sep=';')
 
@@ -144,7 +173,6 @@ def processar_csv_upload(uploaded_file, df_estoque):
                 
                 df_estoque.at[idx, 'ultimo_pedido_id'] = id_pedido
             else:
-                # Geração dinâmica do SKU com padrão XZ
                 novo_sku = f"TH-{len(df_estoque) + 1:03d}"
                 margem_inicial = round(((preco_sugerido - custo_tot_unit) / custo_tot_unit) * 100, 2) if custo_tot_unit > 0 else 0.0
 
@@ -175,7 +203,7 @@ df_vendas = carregar_vendas()
 # ________________________________
 # INTERFACE GRÁFICA (SIDEBAR E NAVEGAÇÃO)
 # ________________________________
-st.sidebar.title("🛍️ TH Variedades")
+st.sidebar.title("🛍️ XZ Variedades")
 st.sidebar.markdown("---")
 
 menu = st.sidebar.radio(
@@ -199,7 +227,6 @@ if st.sidebar.button("⚠️ Zerar Todos os Dados", key="btn_zerar_dados"):
     ])
     
     salvar_dados(df_estoque_zerado, df_vendas_zerado)
-    # Limpeza do Estado da Memória ao zerar
     if "df_edit" in st.session_state:
         del st.session_state["df_edit"]
     st.sidebar.success("Todos os dados foram zerados!")
@@ -247,16 +274,13 @@ elif menu == "📦 Estoque & Preços":
     if not df_estoque.empty:
         st.caption("💡 Digite um novo valor em **Preço de Venda (R$)** e aperte **Enter**. A **% Margem Lucro** será recalculada automaticamente!")
 
-        # Sincronização e Persistência do Estado da Memória ao Editar Preços
         st.session_state.df_edit = df_estoque.copy()
 
-        # Recalcular margem para cada linha exibida na tela
         st.session_state.df_edit['margem_porcentagem'] = st.session_state.df_edit.apply(
             lambda row: round(((row['preco_venda_unitario'] - row['custo_total_unitario']) / row['custo_total_unitario']) * 100, 2)
             if row['custo_total_unitario'] > 0 else 0.0, axis=1
         )
 
-        # Tabela editável
         edited_df = st.data_editor(
             st.session_state.df_edit,
             column_config={
@@ -275,7 +299,6 @@ elif menu == "📦 Estoque & Preços":
             key="tabela_editor_interativo"
         )
 
-        # Se houver modificações na tabela, salva dados, sincroniza estado e recarrega
         if not edited_df.equals(st.session_state.df_edit):
             salvar_dados(edited_df, df_vendas)
             st.session_state.df_edit = edited_df
@@ -332,7 +355,6 @@ elif menu == "🛒 Registrar Venda":
                 df_vendas = pd.concat([df_vendas, pd.DataFrame([nova_venda])], ignore_index=True)
                 
                 salvar_dados(df_estoque, df_vendas)
-                # Limpeza do cache ao registrar venda
                 if "df_edit" in st.session_state:
                     del st.session_state["df_edit"]
                 st.toast(f"Venda de {qtd_venda}x '{item['nome_produto']}' registrada!", icon="🎉")
@@ -358,7 +380,6 @@ elif menu == "📥 Importar Pedido (CSV)":
                 
             if sucesso:
                 salvar_dados(df_estoque, df_vendas)
-                # Limpeza do Estado da Memória ao Importar Pedido
                 if "df_edit" in st.session_state:
                     del st.session_state["df_edit"]
                 st.success("✅ Pedido processado e adicionado ao estoque!")
