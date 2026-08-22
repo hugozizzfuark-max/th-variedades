@@ -180,13 +180,13 @@ df_vendas = carregar_vendas()
 # ________________________________
 # INTERFACE GRÁFICA (SIDEBAR E NAVEGAÇÃO)
 # ________________________________
-st.sidebar.title("📦 Gestão de Vendas & PDV")
+st.sidebar.title("📦 TH Gestão de Vendas & PDV")
 st.sidebar.markdown("---")
 
 menu = st.sidebar.radio(
     "Navegação", 
     ["📊 Dashboard & KPIs", "📦 Estoque & Preços", "🛒 Registrar Venda", "📥 Importar Pedido (CSV)"],
-    key="menu_principal_xz"
+    key="menu_principal_th"
 )
 
 st.sidebar.markdown("---")
