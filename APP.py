@@ -4,14 +4,13 @@ import unicodedata
 from datetime import datetime
 import os
 import re
-from github import Github
 
 # ________________________________
 # CONFIGURAÇÃO DA PÁGINA STREAMLIT
 # ________________________________
 st.set_page_config(
-    page_title="TH Variedades - Gestão & Estoque",
-    page_icon="🛍️",
+    page_title="TH VARIEDADES | Gestão & Estoque",
+    page_icon="📦",
     layout="wide"
 )
 
@@ -36,7 +35,7 @@ def limpar_nome_produto(nome):
 
 def carregar_estoque():
     if os.path.exists(ARQUIVO_ESTOQUE):
-        df = pd.read_csv(ARQUIVO_ESTOQUE)
+        df = pd.read_csv(ARQUIVO_ESTOQUE, dtype={'sku': str, 'ultimo_pedido_id': str})
         if 'margem_porcentagem' not in df.columns:
             df['margem_porcentagem'] = 0.0
         return df
@@ -49,7 +48,7 @@ def carregar_estoque():
 
 def carregar_vendas():
     if os.path.exists(ARQUIVO_VENDAS):
-        return pd.read_csv(ARQUIVO_VENDAS)
+        return pd.read_csv(ARQUIVO_VENDAS, dtype={'sku': str, 'id_venda': str})
     else:
         return pd.DataFrame(columns=[
             'id_venda', 'sku', 'nome_produto', 'quantidade_vendida', 
@@ -64,34 +63,6 @@ def salvar_dados(df_estoque, df_vendas):
         )
     df_estoque.to_csv(ARQUIVO_ESTOQUE, index=False)
     df_vendas.to_csv(ARQUIVO_VENDAS, index=False)
-
-    # Sincronização automática com GitHub API via Secrets ou Token direto
-    token = st.secrets.get("GITHUB_TOKEN", "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")
-    repo_name = st.secrets.get("REPO_NAME", "hugozizzfuark-max/th-variedades")
-
-    if token and repo_name:
-        try:
-            g = Github(token)
-            repo = g.get_repo(repo_name)
-            
-            # Atualizar estoque.csv no GitHub
-            conteudo_estoque = df_estoque.to_csv(index=False)
-            try:
-                file_estoque = repo.get_contents(ARQUIVO_ESTOQUE)
-                repo.update_file(file_estoque.path, "Atualiza estoque.csv via Streamlit", conteudo_estoque, file_estoque.sha)
-            except Exception:
-                repo.create_file(ARQUIVO_ESTOQUE, "Cria estoque.csv via Streamlit", conteudo_estoque)
-
-            # Atualizar vendas.csv no GitHub
-            conteudo_vendas = df_vendas.to_csv(index=False)
-            try:
-                file_vendas = repo.get_contents(ARQUIVO_VENDAS)
-                repo.update_file(file_vendas.path, "Atualiza vendas.csv via Streamlit", conteudo_vendas, file_vendas.sha)
-            except Exception:
-                repo.create_file(ARQUIVO_VENDAS, "Cria vendas.csv via Streamlit", conteudo_vendas)
-
-        except Exception as e:
-            st.error(f"Erro ao sincronizar dados com o GitHub: {e}")
 
 def processar_csv_upload(uploaded_file, df_estoque):
     try:
@@ -203,13 +174,13 @@ df_vendas = carregar_vendas()
 # ________________________________
 # INTERFACE GRÁFICA (SIDEBAR E NAVEGAÇÃO)
 # ________________________________
-st.sidebar.title("🛍️ TH Variedades")
+st.sidebar.title("📦 Gestão de Vendas & PDV")
 st.sidebar.markdown("---")
 
 menu = st.sidebar.radio(
     "Navegação", 
     ["📊 Dashboard & KPIs", "📦 Estoque & Preços", "🛒 Registrar Venda", "📥 Importar Pedido (CSV)"],
-    key="menu_principal_th"
+    key="menu_principal_xz"
 )
 
 st.sidebar.markdown("---")
@@ -227,8 +198,6 @@ if st.sidebar.button("⚠️ Zerar Todos os Dados", key="btn_zerar_dados"):
     ])
     
     salvar_dados(df_estoque_zerado, df_vendas_zerado)
-    if "df_edit" in st.session_state:
-        del st.session_state["df_edit"]
     st.sidebar.success("Todos os dados foram zerados!")
     st.rerun()
 
@@ -255,8 +224,8 @@ if menu == "📊 Dashboard & KPIs":
     col4.metric("Prev. Lucro Total (Estoque)", f"R$ {prev_lucro:.2f}")
 
     col_m1, col_m2 = st.columns(2)
-    col_m1.metric("📈 % Margem de Lucro Real (Até o momento)", f"{margem_real_pct:.2f}%")
-    col_m2.metric("📦 % Margem de Lucro Total (Estoque Projetado)", f"{margem_estoque_pct:.2f}%")
+    col_m1.metric("📈 % Margem de Lucro Real", f"{margem_real_pct:.2f}%")
+    col_m2.metric("📦 % Margem de Lucro Projetada", f"{margem_estoque_pct:.2f}%")
 
     st.markdown("---")
     st.subheader("📋 Histórico Recente de Vendas")
@@ -266,23 +235,22 @@ if menu == "📊 Dashboard & KPIs":
         st.info("Nenhuma venda registrada até o momento.")
 
 # ________________________________
-# ABA 2: ESTOQUE E PREÇOS (RECALCULANDO MARGEM AO DIGITAR)
+# ABA 2: ESTOQUE E PREÇOS
 # ________________________________
 elif menu == "📦 Estoque & Preços":
     st.title("📦 Gerenciamento de Estoque e Margens")
     
     if not df_estoque.empty:
-        st.caption("💡 Digite um novo valor em **Preço de Venda (R$)** e aperte **Enter**. A **% Margem Lucro** será recalculada automaticamente!")
+        st.caption("💡 Edite os valores na tabela e clique no botão **Salvar Alterações nos Preços** para confirmar.")
 
-        st.session_state.df_edit = df_estoque.copy()
-
-        st.session_state.df_edit['margem_porcentagem'] = st.session_state.df_edit.apply(
+        df_display = df_estoque.copy()
+        df_display['margem_porcentagem'] = df_display.apply(
             lambda row: round(((row['preco_venda_unitario'] - row['custo_total_unitario']) / row['custo_total_unitario']) * 100, 2)
             if row['custo_total_unitario'] > 0 else 0.0, axis=1
         )
 
         edited_df = st.data_editor(
-            st.session_state.df_edit,
+            df_display,
             column_config={
                 "sku": st.column_config.TextColumn("SKU", disabled=True),
                 "nome_produto": st.column_config.TextColumn("Produto", disabled=True),
@@ -299,13 +267,8 @@ elif menu == "📦 Estoque & Preços":
             key="tabela_editor_interativo"
         )
 
-        if not edited_df.equals(st.session_state.df_edit):
-            salvar_dados(edited_df, df_vendas)
-            st.session_state.df_edit = edited_df
-            st.rerun()
-
         if st.button("💾 Salvar Alterações nos Preços", use_container_width=True):
-            salvar_dados(st.session_state.df_edit, df_vendas)
+            salvar_dados(edited_df, df_vendas)
             st.toast("Preços e margens salvos com sucesso!", icon="✅")
             st.rerun()
     else:
@@ -355,8 +318,6 @@ elif menu == "🛒 Registrar Venda":
                 df_vendas = pd.concat([df_vendas, pd.DataFrame([nova_venda])], ignore_index=True)
                 
                 salvar_dados(df_estoque, df_vendas)
-                if "df_edit" in st.session_state:
-                    del st.session_state["df_edit"]
                 st.toast(f"Venda de {qtd_venda}x '{item['nome_produto']}' registrada!", icon="🎉")
                 st.rerun()
         else:
@@ -375,13 +336,11 @@ elif menu == "📥 Importar Pedido (CSV)":
     
     if arquivo_upload is not None:
         if st.button("🚀 Processar Pedido", use_container_width=True):
-            with st.spinner("Processando itens, calculando frete e gerando preços sugeridos (150% de lucro)..."):
+            with st.spinner("Processando itens e calculando rateio de frete..."):
                 df_estoque, sucesso, qtd_itens, frete = processar_csv_upload(arquivo_upload, df_estoque)
                 
             if sucesso:
                 salvar_dados(df_estoque, df_vendas)
-                if "df_edit" in st.session_state:
-                    del st.session_state["df_edit"]
                 st.success("✅ Pedido processado e adicionado ao estoque!")
                 st.toast("Estoque atualizado com sucesso!", icon="📦")
                 
