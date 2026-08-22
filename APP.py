@@ -2,8 +2,8 @@ import streamlit as st
 import pandas as pd
 import unicodedata
 from datetime import datetime
-import os
 import re
+from streamlit_gsheets import GSheetsConnection
 
 # ________________________________
 # CONFIGURAÇÃO DA PÁGINA STREAMLIT
@@ -14,8 +14,8 @@ st.set_page_config(
     layout="wide"
 )
 
-ARQUIVO_ESTOQUE = "estoque.csv"
-ARQUIVO_VENDAS = "vendas.csv"
+# Inicializa conexão com o Google Sheets
+conn = st.connection("gsheets", type=GSheetsConnection)
 
 # ________________________________
 # FUNÇÕES AUXILIARES DE DADOS
@@ -34,12 +34,22 @@ def limpar_nome_produto(nome):
     return nome_limpo.strip()
 
 def carregar_estoque():
-    if os.path.exists(ARQUIVO_ESTOQUE):
-        df = pd.read_csv(ARQUIVO_ESTOQUE, dtype={'sku': str, 'ultimo_pedido_id': str})
+    try:
+        # Lê a aba 'estoque' da planilha no Google Sheets (ttl=0 desativa cache para pegar atualizado)
+        df = conn.read(worksheet="estoque", ttl=0)
+        if df.empty:
+            return pd.DataFrame(columns=[
+                'sku', 'nome_produto', 'quantidade_estoque', 
+                'preco_custo_unitario', 'frete_unitario', 'custo_total_unitario', 
+                'preco_venda_unitario', 'margem_porcentagem', 'ultimo_pedido_id'
+            ])
+        df['sku'] = df['sku'].astype(str)
+        df['ultimo_pedido_id'] = df['ultimo_pedido_id'].astype(str)
         if 'margem_porcentagem' not in df.columns:
             df['margem_porcentagem'] = 0.0
         return df
-    else:
+    except Exception as e:
+        st.error(f"Erro ao carregar estoque do Google Sheets: {e}")
         return pd.DataFrame(columns=[
             'sku', 'nome_produto', 'quantidade_estoque', 
             'preco_custo_unitario', 'frete_unitario', 'custo_total_unitario', 
@@ -47,12 +57,21 @@ def carregar_estoque():
         ])
 
 def carregar_vendas():
-    if os.path.exists(ARQUIVO_VENDAS):
-        df = pd.read_csv(ARQUIVO_VENDAS, dtype={'sku': str, 'id_venda': str})
+    try:
+        # Lê a aba 'vendas' da planilha no Google Sheets
+        df = conn.read(worksheet="vendas", ttl=0)
+        if df.empty:
+            return pd.DataFrame(columns=[
+                'id_venda', 'sku', 'nome_produto', 'quantidade_vendida', 
+                'preco_venda_praticado', 'custo_unitario', 'lucro_total_venda', 'data_hora'
+            ])
+        df['sku'] = df['sku'].astype(str)
+        df['id_venda'] = df['id_venda'].astype(str)
         if not df.empty and 'data_hora' in df.columns:
             df['data_hora_dt'] = pd.to_datetime(df['data_hora'], errors='coerce')
         return df
-    else:
+    except Exception as e:
+        st.error(f"Erro ao carregar vendas do Google Sheets: {e}")
         return pd.DataFrame(columns=[
             'id_venda', 'sku', 'nome_produto', 'quantidade_vendida', 
             'preco_venda_praticado', 'custo_unitario', 'lucro_total_venda', 'data_hora'
@@ -67,8 +86,9 @@ def salvar_dados(df_estoque, df_vendas):
     df_estoque_salvar = df_estoque.drop(columns=['data_hora_dt'], errors='ignore')
     df_vendas_salvar = df_vendas.drop(columns=['data_hora_dt'], errors='ignore')
     
-    df_estoque_salvar.to_csv(ARQUIVO_ESTOQUE, index=False)
-    df_vendas_salvar.to_csv(ARQUIVO_VENDAS, index=False)
+    # Atualiza as abas no Google Sheets
+    conn.update(worksheet="estoque", data=df_estoque_salvar)
+    conn.update(worksheet="vendas", data=df_vendas_salvar)
 
 def processar_csv_upload(uploaded_file, df_estoque):
     try:
@@ -172,7 +192,7 @@ def processar_csv_upload(uploaded_file, df_estoque):
         return df_estoque, False, 0, 0.0
 
 # ________________________________
-# CARREGAR DADOS
+# CARREGAR DADOS DO GOOGLE SHEETS
 # ________________________________
 df_estoque = carregar_estoque()
 df_vendas = carregar_vendas()
@@ -238,7 +258,7 @@ with st.sidebar.popover("⚠️ Zerar Todos os Dados"):
             ])
             
             salvar_dados(df_estoque_zerado, df_vendas_zerado)
-            st.success("Todos os dados foram zerados com sucesso!")
+            st.success("Todos os dados foram zerados com sucesso no Google Sheets!")
             st.rerun()
         else:
             st.error("❌ Senha incorreta! Os dados não foram alterados.")
@@ -257,7 +277,7 @@ if menu == "📊 Dashboard & KPIs":
         
         # Filtro de Produto
         produtos_disponiveis = ["Todos"] + sorted(list(set(
-            df_estoque['nome_produto'].tolist() + df_vendas['nome_produto'].tolist()
+            df_estoque['nome_produto'].dropna().tolist() + df_vendas['nome_produto'].dropna().tolist()
         )))
         produto_sel = f_col1.selectbox("Filtrar por Produto:", produtos_disponiveis)
         
@@ -331,7 +351,6 @@ if menu == "📊 Dashboard & KPIs":
                 key="radio_top_produtos"
             )
 
-        # Agrupamento dos dados
         vendas_agrupadas = df_vendas_f.groupby(['sku', 'nome_produto'])['quantidade_vendida'].sum().reset_index()
         vendas_agrupadas['Produto'] = vendas_agrupadas['sku'] + " - " + vendas_agrupadas['nome_produto']
         
@@ -341,7 +360,6 @@ if menu == "📊 Dashboard & KPIs":
             ascending=not is_top
         ).head(5)
 
-        # Prepara estrutura para gráfico de barras do Streamlit
         chart_data = vendas_agrupadas.set_index('Produto')[['quantidade_vendida']]
         chart_data.columns = ['Qtd. Vendida']
 
@@ -393,7 +411,7 @@ elif menu == "📦 Estoque & Preços":
 
         if st.button("💾 Salvar Alterações nos Preços", use_container_width=True):
             salvar_dados(edited_df, df_vendas)
-            st.toast("Preços e margens salvos com sucesso!", icon="✅")
+            st.toast("Preços e margens salvos no Google Sheets!", icon="✅")
             st.rerun()
     else:
         st.info("O estoque está vazio. Importe um pedido em CSV para começar.")
@@ -442,7 +460,7 @@ elif menu == "🛒 Registrar Venda":
                 df_vendas = pd.concat([df_vendas, pd.DataFrame([nova_venda])], ignore_index=True)
                 
                 salvar_dados(df_estoque, df_vendas)
-                st.toast(f"Venda de {qtd_venda}x '{item['nome_produto']}' registrada!", icon="🎉")
+                st.toast(f"Venda de {qtd_venda}x '{item['nome_produto']}' registrada no Google Sheets!", icon="🎉")
                 st.rerun()
         else:
             st.warning("⚠️ Todos os produtos cadastrados estão com o estoque zerado.")
@@ -460,16 +478,16 @@ elif menu == "📥 Importar Pedido (CSV)":
     
     if arquivo_upload is not None:
         if st.button("🚀 Processar Pedido", use_container_width=True):
-            with st.spinner("Processando itens e calculando rateio de frete..."):
+            with st.spinner("Processando itens e salvando no Google Sheets..."):
                 df_estoque, sucesso, qtd_itens, frete = processar_csv_upload(arquivo_upload, df_estoque)
                 
-            if sucesso:
-                salvar_dados(df_estoque, df_vendas)
-                st.success("✅ Pedido processado e adicionado ao estoque!")
-                st.toast("Estoque atualizado com sucesso!", icon="📦")
-                
-                c1, c2 = st.columns(2)
-                c1.metric("Itens Processados", qtd_itens)
-                c2.metric("Frete Rateado Detectado", f"R$ {frete:.2f}")
-                
-                st.balloons()
+                if sucesso:
+                    salvar_dados(df_estoque, df_vendas)
+                    st.success("✅ Pedido processado e adicionado ao estoque no Google Sheets!")
+                    st.toast("Estoque atualizado com sucesso!", icon="📦")
+                    
+                    c1, c2 = st.columns(2)
+                    c1.metric("Itens Processados", qtd_itens)
+                    c2.metric("Frete Rateado Detectado", f"R$ {frete:.2f}")
+                    
+                    st.balloons()
